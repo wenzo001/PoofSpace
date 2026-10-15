@@ -14,3 +14,6 @@ coverage/
 test-output/
 scratch/
 tsconfig.tsbuildinfo
+
+# 同步公司线用的独立 worktree（见 internal-deploy 上的 docs/DEPLOY-K3S.md 第 0 节）
+.worktrees/
