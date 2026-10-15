@@ -9,7 +9,8 @@
 ## 0. 一句话结论
 
 自动化验收 **16/16 PASS、0 FAIL、0 SKIP**（`GATES_EXIT=0`，台面 `scratch/gates-oss-final2.log`，
-判定对象是交付包本体：`build-info.json` 的 `builtAt=2026-10-15T08:20:02.497Z`、`nextBuildId=SYQv27QbLjMho6dSA1zuX`、
+判定对象是那一次台面所用的整包（交付前"只重拷文档"的再打包与它的差别见 §7.6 末）：
+`build-info.json` 的 `builtAt=2026-10-15T08:20:02.497Z`、`nextBuildId=SYQv27QbLjMho6dSA1zuX`、
 `abi=137`，包体 `release/poofspace-deploy.tar.gz` 96,096,390 字节，产物顶层含 `LICENSE / README.md / README.zh-CN.md / CHANGELOG.md`）。
 同一个包的**前一次**整台面是 `13 PASS / 3 FAIL`，三条红全部来自浏览器线的一条腿（`https lock tooltip` 建房 30 s 超时），
 单跑该腿绿、台面重跑整条绿 —— 这是一次未复现的间歇红，按签名登记在 D20，不当成"已排除"，也不拿第二次绿抹掉第一次红。
@@ -366,7 +367,8 @@ PASS served html makes no transport assurance: claim=false conservative=true ←
 **那一次红没有被"第二次绿"抹掉**：它登记为 D20（未复现的间歇红，签名明确、只此一条腿、
 两次台面一次见到），处置口径与 D13 相同 —— 不升格成产品缺陷，也不许调大超时把签名消音。
 
-交付包：`release/poofspace/` + `release/poofspace-deploy.tar.gz` 96,096,390 字节；
+交付包：`release/poofspace/` + `release/poofspace-deploy.tar.gz`（final2 那一次 96,096,390 字节 —— 这个数字
+不钉死，交付那次"只重拷文档"的打包会让它跟着文档的字节数走，要以包外实际文件为准）；
 `build-info.json` 记 `builtAt=2026-10-15T08:20:02.497Z`、`nextBuildId=SYQv27QbLjMho6dSA1zuX`、
 `stagedCopyVerified=true`、`extractedTarballVerified=true`、`win32/x64/node v24.16.0/abi 137`、
 60 个生产包 + `better_sqlite3.node` + 13 个静态文件、产物内运行数据 none。
@@ -377,9 +379,18 @@ T4 71.6 s（2/9）、T5 十条腿全绿、T6 8.6 s（3/30）。
 变异证人合计 24 + 3 把（D9 的两把与 SSR 保证那把见 §7.5），台账 `scratch/mutation-ledger-spec8.md`。
 
 一句要如实说的：包里那份 `docs/*` 就是本节这一版文字，而它引用的台面读数来自紧接其前的那一次整台面跑；
-两者对应的**代码树完全相同**（最后一次打包只重拷了文档，没动 `src/`），差别只在逐腿耗时那一列。
-交付时还会再做一次"只重拷文档"的打包（`npm run release -- --no-build`：源戳比产物旧就直接拒绝，且两条启动冒烟照样重跑），
-其时间戳以**包内** `release/build-info.json` 为准 —— 本报告不把它写死在正文里，免得文字比它自己描述的包更旧。
+两者对应的**代码树完全相同**，差别只在逐腿耗时那一列。
+
+但**交付包里的编译产物不是上面那条 08:20:02.497Z 那一次 build 的字节**：台面 B1 那条腿自己会从干净树跑
+`npm run build`（`scripts/run-gates.mjs:203`），final2 那一遍因此在 08:27:39Z 重写了 `.next/` 与 `dist/`，
+而 Next 每次编译换一个随机 `BUILD_ID` —— 交付包里记的是 `nextBuildId=Bl3dissujagYIdmWjbGB2`。
+两份记录的源码戳是同一个 `2026-10-15T08:09:29.269Z`（`sourceStamp()` 只算 `src/` 与配置文件，文档不进这个戳，
+所以"只重拷文档"的打包不会被判定为过期），也就是说：**同一份代码，编译了两次**，台面认证的是第一次，
+交付的是第二次。要分辨这两者只能靠包内 `build-info.json`，正文不写交付那一次的 `builtAt` ——
+每改一次文档就要重打包一次，把 `builtAt` 写进正文等于让这句话在自己脚下过期。
+交付用的打包走 `npm run release -- --no-build`：产物比源码旧就直接拒绝（`scripts/build-release.mjs:138`），
+两条启动冒烟照样重跑 —— 最近这一次退 0，暂存树与解开的 tarball 各 10 条断言全过
+（`scratch/release-docs-final.log`）。
 
 版本状态：本轮经用户明确授权后在本地建立 `chore → feat → test → docs` 四条主提交，再加一条把本段状态写回报告的 `docs` 提交，
 注解标签 `v1.0.0` 打在最后这一条上（每条都用显式路径 `git add`，索引里不含 `data/`、`release/`、`scratch/`、日志或数据库文件）。
