@@ -1,0 +1,166 @@
+# PoofSpace（中文）
+
+**建房即分享，进房即聊天，端到端加密。最后一人离开后，房间自己烧掉——并且不会在服务器上留下任何日后可读的东西。**
+
+PoofSpace 是一个自托管、免注册、多方端到端加密聊天室，跑在**单个 Node.js 进程**里：
+没有账号、没有好友关系、没有目录、没有埋点、没有外部数据库、没有对象存储。
+一个进程、一个只当临时运行库用的 SQLite 文件、一个附件临时目录。
+
+英文主文档：[README.md](README.md)。仓库内其余 `docs/*` 目前为中文。
+
+## 适合谁
+
+同一网络里的一个团队或一组机器，想要临时性的加密群聊（含文件传输），
+但不想先部署身份系统，也不想让主机方看到内容。
+如果你需要**房间销毁后还能查历史**、多设备同步、审计留痕 —— 这个项目做不了，
+这些恰恰是 PoofSpace 拒绝保存的东西。
+
+## 它做什么
+
+| | |
+| --- | --- |
+| **建房即分享** | 128 位随机房间 ID + 256 位秘密，全部**在浏览器里生成**。秘密只走 URL 的 `#` 片段（永远不会到达服务器），以及你转发的邀请口令。 |
+| **进房即聊天** | 文字 + 任意类型文件/图片，在浏览器内加密后才上传。后进的人可以解密并回看仍然保留的历史。 |
+| **最后一人离开 → 倒计时** | `ACTIVE → IDLE_GRACE（300 秒）→ DESTROYING → DESTROYED`。窗口内任何持有效邀请的人回到的是**同一间房**：倒计时取消，历史原样在读。 |
+| **自动销毁** | 不需要人工清理。销毁会删掉密文、附件分片、未完成的上传、会话，以及房间那一行本身 —— 已销毁的房间在数据库里**不留任何记录**。 |
+| **服务端读不到** | 服务器只持有房间状态、随机 ID、密文与最少运行元数据；它从未经手密钥、明文、文件名或 MIME 类型。 |
+
+## 它明确不宣称什么
+
+这几条不是免责声明，而是产品界面与 `docs/SECURITY.md` 里同样写明的边界：
+
+- **不承诺前向保密。** 房间秘密一旦泄露，该房间已存的密文历史就能被解开。
+- **不承诺成员撤销。** 离开的人只要还留着链接，在房间存活期间就能再进来。
+- **不承诺绝对擦除。** 截图、复制到其他应用的内容、已下载的文件、文件系统 journal、快照、SSD 磨损均衡
+  都不在任何应用层能删除的范围里。PoofSpace 只主张三件事：不存在可用的应用层恢复路径、受控存储已被清理、
+  服务器拿不到解密残留所需的秘密。
+- **HTTPS ≠ 端到端加密。** 锁形图标只说明传输层加密；房间内容是另外一层独立加密，纯 HTTP 下照样成立。
+
+## 快速开始（开发）
+
+```bash
+npm install
+npm run dev          # 自定义 Node 服务 + Next.js，http://localhost:3000
+```
+
+需要 Node.js ≥ 20.9（开发与验证都在 v24.16.0 上做）。`better-sqlite3` 含原生模块，
+目标平台要么有匹配的预编译二进制，要么有编译工具链。
+
+```bash
+npm test             # 14 个文件 / 156 条自动化判据
+npm run typecheck
+npm run gates        # 整张验收台面（B1–B10 + T1–T6），SKIP 一律不算通过
+npm run release      # 构建 → 暂存产物 → 启动它 → 再把 tar 包解压出来启动一遍
+```
+
+## 部署
+
+```bash
+npm run build
+HOST=0.0.0.0 PORT=3000 DATA_DIR=/srv/poofspace/data pm2 start ecosystem.config.cjs --env production
+node scripts/healthcheck.mjs --port 3000 --retries 10
+```
+
+PM2 固定 **fork 模式 + 单实例**：WebSocket 连接、房间内存态、限流桶和 SQLite 文件都在这一个进程里。
+要扩容请在负载均衡后面多台机器部署，而不是加实例数。
+
+支持五种形态，全部靠环境变量区分，源码里没有硬编码域名/IP/端口/协议；客户端按页面协议自动选
+`ws://` 或 `wss://`：局域网 IP + HTTP、公网 IP + HTTP、域名 + HTTPS、IP + HTTPS、
+Nginx 终止 HTTPS → Node HTTP。逐条配置见 `docs/DEPLOYMENT.md`。
+
+运维最容易踩的两点：
+
+- `data/` 必须落在持久盘，且**绝不能**当静态目录对外发布。发布审计（门禁 B2/B5）会检查产物里没有运行数据。
+- 容量类变量在**启动时校验**：`MAX_ROOMS=0`、`MAX_ROOMS=many`、`ROOM_IDLE_TTL_SECONDS=5`
+  会让进程带着出错的变量名直接拒绝启动，而不是静默回落到默认值。
+
+### 关键配置
+
+| 变量 | 默认 | 含义 |
+| --- | --- | --- |
+| `MAX_ROOMS` | `20` | 本节点同时承载的房间数；`ACTIVE`、`IDLE_GRACE` 与未完成清理的 `DESTROYING` 都占名额。 |
+| `MAX_PARTICIPANTS_PER_ROOM` | `100` | 每房间人数上限，由服务端执行（客户端要求更大值也不会越过它）。 |
+| `ROOM_IDLE_TTL_SECONDS` | `300` | 最后一人离开后的恢复窗口；按墙钟计时，停机时间也算在内。 |
+| `MAX_CONNECTIONS_NODE` / `MAX_CONNECTIONS_PER_IP` | `4000` / `512` | WebSocket 连接闸门，超限在握手前以 HTTP 503 拒绝。 |
+| `ATTACHMENT_BYTES_MAX` / `ROOM_ATTACHMENT_BYTES_MAX` / `TEMP_BYTES_MAX_NODE` | `256 MiB` / `2 GiB` / `20 GiB` | 单附件、单房间、全节点的密文临时配额。 |
+| `DATA_DIR` / `DB_FILE` / `ROOMS_DIR` | `./data` | 临时数据库文件与附件根目录。 |
+| `TLS_KEY_FILE` + `TLS_CERT_FILE` | 关 | 两者同时给出才由 Node 直接提供 HTTPS。 |
+| `TRUST_PROXY` | `false` | 只有开了它才会参考 `X-Forwarded-*`。 |
+
+完整表（心跳、分片大小、上传 TTL、VACUUM 阈值、管理通道文件）在 `docs/DEPLOYMENT.md`。
+
+## 运维：两条命令，只在部署机上跑
+
+```bash
+npm run admin:status                              # 只读聚合计数
+npm run admin:rooms:disconnect-all -- --yes       # 停止接受 → 销毁全部房间 → 断开全部连接 → 恢复接受
+npm run admin:data:purge-all -- --yes             # 清空全部房间/密文/会话/临时存储后再恢复服务
+```
+
+这里**没有 HTTP 管理接口**：公开监听端口上没有 `/admin`，首页没有管理入口，也不存在普通用户权限体系。
+管理通道是同进程另起的一个**只绑 `127.0.0.1`** 的端口，端口与一次性令牌写在
+`$DATA_DIR/admin-control.json`（`0600`）——能读到这个文件的前提就是你已经有部署目录和操作系统权限。
+没有令牌一律 401。
+
+每条都有判据兜着（`tests/admin/`）：
+
+- 执行前先打印爆炸半径；`data:purge-all` 还要显式确认（交互输入 `PURGE`，非交互必须 `--yes`）。
+- 退出码可机器检查：`0` 完成，`1` 失败或仍处于维护态，`2` 用法/未确认，`3` 找不到服务。
+- 输出只有计数 —— 不打印房间 ID、邀请材料、会话令牌或任何正文。
+- 清理证明不了自己就保持维护态并如实报错，绝不宣称"已清空"；故障排除后重跑同一条命令会把没做完的部分补完并恢复接受。
+- 服务在跑时 `--offline` 会拒绝删除仍被服务打开的数据库文件。
+
+## 这些保证是怎么被测出来的
+
+本仓库不接受"看起来挺安全"。每道门禁在相信它的绿之前都先被证明会红 —— 即先把产品代码故意改坏，
+看那一条判据是否变红；跳过（SKIP）永远不算通过，严格台面会因 SKIP 失败。
+
+当前状态：**16 道门 PASS / 0 FAIL / 0 SKIP**（`npm run gates`），156 条自动化判据，
+外加真实浏览器线 10 条腿：在 chromium 里同时跑 `http://<局域网 IP>:<端口>`（真的非安全上下文，
+`crypto.subtle` 缺席，走打包进产物的纯 JS AES-GCM）与真 TLS。几处重点：
+
+- 静态只存密文：同一个明文标记会去"出站 WebSocket 帧 / SQLite 文件 / 房间临时目录"三处找，必须一处都没有。
+- 伪造 proof、重放销毁、篡改分片、挪动分片下标、跨房间使用会话令牌、无密钥尝试解密 —— 各自单独被拒。
+- 已销毁房间没有行、没有文件、也没有可恢复的页面：判据会在 checkpoint + VACUUM 之后把整个数据目录
+  按字节扫一遍找旧密文。
+- 第 299 秒重进回到同一间房；第 301 秒被拒；刷新导致的断线不会销毁房间。
+- 产物被证明就是这棵树编译出来的（`sourceNewestMs` 与 `outputNewestMs` 对照），
+  而且暂存树与**解压出来的 tar 包**都各自启动并跑完整链路。
+
+逐条读数与变异证人在 `docs/TEST-REPORT.md`；还没做到的主张登记成可证伪台账而不是安慰话，见 `docs/DEBT.md`。
+
+## 设计说明
+
+- `docs/ARCHITECTURE.md` —— 模块边界、数据模型、生命周期状态机、容量名额算法、背压，以及管理通道为什么不在 HTTP 上。
+- `docs/SECURITY.md` —— 威胁模型、密钥推导与 nonce 纪律、AAD 绑定、日志里有什么（不含任何身份标识）、不可枚举规则、CSP 妥协（`'unsafe-inline'` 是给 Next 的行内 flight 脚本留的，不是偏好）。
+- `docs/DEPLOYMENT.md` —— 五种形态、PM2、环境变量总表、升级与 schema 迁移行为、运维命令。
+
+加密代码全部打进产物：AES-256-GCM 与 HKDF 优先用 Web Crypto，缺失时用 `@noble/ciphers` 编译进客户端包。
+**运行时不从任何 CDN 拉代码** —— 离线内网部署不能依赖外网才能加密。
+
+## 目录结构
+
+```
+src/server/     单进程服务端：生命周期、容量、ws、http api、存储、管理通道
+src/lib/crypto/ 信封、密钥、邀请编码（客户端与测试共用）
+src/lib/client/ 房间客户端、store、本机凭据库、虚拟列表、通知
+src/components/ HomeView、RoomView、各类对话框
+tests/          unit · integration · security · lifecycle · storage · capacity · admin · perf
+scripts/        门禁台、发布打包、真实浏览器线、健康检查
+docs/           架构、安全、部署、测试报告、欠账台账（附 .docx 版本）
+```
+
+## 参与贡献
+
+先看 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）—— 里面写了提交/版本约定，以及塑造本项目测试文化的那一条规矩：
+**没见过自己变红的判据，不算判据。**
+
+提 PR 前先跑 `npm run typecheck && npm test`；
+凡涉及生命周期、容量、存储清理或加密路径的改动，再跑 `npm run gates`。
+新增判据时请证明它会失败：说明你故意改坏了哪一行才看到它红。
+本仓库不写没在改动两侧实测过的墙上时钟预算，界面判据也必须打在渲染后的 DOM/几何状态上，而不是"组件存在"。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。注意 `package.json` 保留 `"private": true`：本项目以源码形式分发，不作为 npm 包发布。
+安全问题请按 [SECURITY.md](SECURITY.md)（英文）私下回报 —— 那份文件也写清了哪些是设计属性而不是漏洞。
