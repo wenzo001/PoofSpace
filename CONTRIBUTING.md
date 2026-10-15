@@ -58,6 +58,17 @@ record a `SKIP` for the rest, so a filtered green is not a table verdict.
   that produced the artifact. `release/build-info.json` stamps which source tree the package was built
   from, and gate B2 refuses a package older than the tree — don't tag a commit whose artifact you did
   not run the table against.
+- Publishing to GitHub: the repository is created and pushed by its owner, not by a script run here.
+  Fill in `repository`, `homepage` and `bugs` in `package.json` first (they are the only place the
+  public URL lives, and `npm run release` checks that the file parses), then:
+
+  ```bash
+  gh repo create <owner>/poofspace --public --source=. --description="Ephemeral E2E-encrypted group rooms"
+  git push -u origin main
+  git push origin v1.0.0          # annotated tag; --follow-tags also works
+  ```
+
+  Nothing here has been pushed yet, and `git log` should stay the only source of truth for that.
 
 ## What the code is responsible for
 

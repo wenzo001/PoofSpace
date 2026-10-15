@@ -2,7 +2,7 @@
 
 - 日期：2026-10-15
 - 现场：Windows 10 x64（10.0.26300）、Node.js v24.16.0（abi 137）、`npm run gates` / `npm run release` / vitest / 真实 chromium
-- 仓库：`D:\code\poofspace`（按规范"未经明确授权不提交"，本地 **0 个 commit**，未推送、未打标签、未发布版本）
+- 仓库：`D:\code\poofspace`。各轮报告的提交状态以 §7.6 结尾为准：补充规范与开源发布这两轮**经用户明确授权后**建立了本地提交与注解标签 `v1.0.0`；**建仓与推送由执行人自己做**（他选的正是"只做本地 commit + tag"）。在此之前，本报告写作时仓库为 0 commit、全部路径 untracked。
 - 判定口径：**PASS / FAIL / SKIP 三态；SKIP 永远不算通过**。下面每一条 PASS 后面跟的是它自己的读数，
   不是"看起来应该没问题"。所有原始日志留在 `scratch/`（构建/门禁输出）与 `release/build-info.json`。
 
@@ -380,5 +380,11 @@ T4 71.6 s（2/9）、T5 十条腿全绿、T6 8.6 s（3/30）。
 两者对应的**代码树完全相同**（最后一次打包只重拷了文档，没动 `src/`），差别只在逐腿耗时那一列。
 交付时还会再做一次"只重拷文档"的打包（`npm run release -- --no-build`：源戳比产物旧就直接拒绝，且两条启动冒烟照样重跑），
 其时间戳以**包内** `release/build-info.json` 为准 —— 本报告不把它写死在正文里，免得文字比它自己描述的包更旧。
-仓库仍是**未提交、未推送、未打标签**（`git status`：所有路径 untracked），按规范"未经明确授权不提交"。
+
+版本状态：本轮经用户明确授权后在本地建立 `chore → feat → test → docs` 四条主提交，再加一条把本段状态写回报告的 `docs` 提交，
+注解标签 `v1.0.0` 打在最后这一条上（每条都用显式路径 `git add`，索引里不含 `data/`、`release/`、`scratch/`、日志或数据库文件）。
+**建仓与推送仍留给执行人**（他选的是"只做本地 commit + tag"）；命令见 `CONTRIBUTING.md` 的
+"Publishing to GitHub"，其中 `package.json` 的 `repository`/`homepage`/`bugs` 三格要由所有者填自己的公开地址，
+本报告与脚本都不替他猜 URL。
+本报告之前各轮所写的"未提交、未打标签"是当时的状态，不是现在的。
 
