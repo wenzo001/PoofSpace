@@ -392,8 +392,8 @@ T4 71.6 s（2/9）、T5 十条腿全绿、T6 8.6 s（3/30）。
 两条启动冒烟照样重跑 —— 最近这一次退 0，暂存树与解开的 tarball 各 10 条断言全过
 （`scratch/release-docs-final.log`）。
 
-版本状态：本轮经用户明确授权后在本地建立 `chore → feat → test → docs` 四条主提交，再加一条把本段状态写回报告的 `docs` 提交，
-注解标签 `v1.0.0` 打在最后这一条上（每条都用显式路径 `git add`，索引里不含 `data/`、`release/`、`scratch/`、日志或数据库文件）。
+版本状态：本轮经用户明确授权后在本地建立 `chore → feat → test → docs` 四条主提交，其后是把本段状态与
+"认证的那次编译 vs 交付的那次编译"写回报告的若干条 `docs` 提交，注解标签 `v1.0.0` 打在最后一条提交上（每条都用显式路径 `git add`，索引里不含 `data/`、`release/`、`scratch/`、日志或数据库文件）。
 **建仓与推送仍留给执行人**（他选的是"只做本地 commit + tag"）；命令见 `CONTRIBUTING.md` 的
 "Publishing to GitHub"，其中 `package.json` 的 `repository`/`homepage`/`bugs` 三格要由所有者填自己的公开地址，
 本报告与脚本都不替他猜 URL。
