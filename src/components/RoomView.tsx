@@ -1,0 +1,896 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import Avatar from '@/components/Avatar';
+import Modal from '@/components/Modal';
+import NicknameDialog from '@/components/NicknameDialog';
+import {
+  BellIcon,
+  CloseIcon,
+  DownloadIcon,
+  FileIcon,
+  ImageIcon,
+  LockIcon,
+  PaperclipIcon,
+  WarnIcon
+} from '@/components/icons';
+import { RoomClient } from '@/lib/client/roomclient';
+import { RoomStore, type RoomSnapshot, type UiMsg } from '@/lib/client/roomstore';
+import { LIMITS } from '@/lib/constants';
+import { DecryptError, type AttachmentMeta } from '@/lib/crypto/envelope';
+import { copyText, dropFull, formatBytes, formatTime, fullUrl, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
+import { currentPermission, notifyEncrypted, requestPermission } from '@/lib/client/notify';
+import { setNotifyOptIn } from '@/lib/client/prefs';
+import { useNick } from '@/lib/client/identity';
+import * as vault from '@/lib/client/vault';
+import { canonicalRoomId, clientOptions, credentialsFromClient, secretFromFragment } from '@/lib/client/runtime';
+import { wipe } from '@/lib/crypto/engine';
+import { useVirtualList } from '@/lib/client/virtuoso';
+
+const EXCERPT_CHARS = 280;
+const EXCERPT_LINES = 10;
+const ROW_ESTIMATE = 84;
+
+const EMPTY_SNAPSHOT: RoomSnapshot = {
+  status: 'connecting',
+  messages: [],
+  members: [],
+  online: 0,
+  hasMore: true,
+  loadingOlder: false,
+  uploads: {},
+  metas: {},
+  blocked: null,
+  fatal: null,
+  notice: null,
+  rev: 0
+};
+
+interface Session {
+  client: RoomClient;
+  store: RoomStore;
+}
+
+interface UploadJob {
+  key: string;
+  name: string;
+  size: number;
+  kind: 'file' | 'image';
+  file: File;
+  state: 'queued' | 'uploading' | 'failed';
+  sent: number;
+  total: number;
+  error?: string;
+}
+
+const NICK_FALLBACK = '我';
+
+/** The lock is only allowed to state what has actually been verified, never more. */
+function securityCopy(secure: boolean): string {
+  return secure
+    ? '消息和文件在设备端加密，服务器无法直接读取内容。当前连接使用 HTTPS。'
+    : '消息和文件采用端到端加密，但 HTTP 连接本身未加密，网络中的攻击者可能篡改网页代码。建议在不可信网络中使用 HTTPS。';
+}
+
+function joinErrorMessage(code: string): string {
+  switch (code) {
+    case 'ROOM_NOT_FOUND':
+      return '房间不存在，或已经被销毁。';
+    case 'ROOM_DESTROYED':
+    case 'ROOM_DESTROYING':
+      return '这个房间已经销毁，旧链接和旧邀请码都无法再进入。';
+    case 'ROOM_FULL':
+      return '房间人数已达上限。';
+    case 'MAINTENANCE':
+      return '服务器正在维护，请稍后重新进入。';
+    case 'BAD_PROOF':
+    case 'BAD_SECRET':
+      return '邀请密钥不正确，无法解密这个房间。';
+    case 'RATE_LIMITED':
+      return '操作过于频繁，请稍后再试。';
+    default:
+      return `无法进入房间：${code}`;
+  }
+}
+
+export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
+  const nickState = useNick();
+  const [sess, setSess] = useState<Session | null>(null);
+  const [fatal, setFatal] = useState<{ title: string; body: string } | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [showNick, setShowNick] = useState(false);
+  const [showDestroy, setShowDestroy] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<UploadJob[]>([]);
+  const [notifyPerm, setNotifyPerm] = useState<string>('unsupported');
+  const [draft, setDraft] = useState('');
+  const [tipOpen, setTipOpen] = useState(false);
+
+  const subscribe = useMemo(() => (sess ? (cb: () => void) => sess.store.subscribe(cb) : () => () => {}), [sess]);
+  const getSnapshot = useMemo(() => () => (sess ? sess.store.getSnapshot() : EMPTY_SNAPSHOT), [sess]);
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+
+  const keys = useMemo(() => snap.messages.map((m) => m.id), [snap.messages]);
+  const virt = useVirtualList(keys, { estimate: ROW_ESTIMATE });
+
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const imageInput = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const busyLoad = useRef(false);
+  const activeUpload = useRef(false);
+  const currentUploadKey = useRef<string | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = sess;
+
+  // Device-local state, so it cannot be known while rendering on the server. Assuming `true` there
+  // put "当前连接使用 HTTPS。" into the HTML of a plain-http response — measured, not inferred: with
+  // that line the served bytes carry the claim and the gate below goes red. A tooltip that is in
+  // the first paint is something a user can be shown before hydration has anything to say, so the
+  // conservative copy is what may be written into the document, and the effect corrects it after.
+  const [secure, setSecure] = useState(false);
+  useEffect(() => {
+    setSecure(window.location.protocol === 'https:');
+  }, []);
+  const blocked = snap.blocked;
+
+  const reportAuthFailure = useCallback(() => {
+    sess?.store.setBlocked('端到端加密校验失败，附件内容可能已被篡改，已停止展示与下载。');
+  }, [sess]);
+
+  // ------------------------------------------------------------------ session
+  useEffect(() => {
+    let disposed = false;
+    const roomId = canonicalRoomId(roomIdProp);
+    if (!roomId) {
+      setFatal({ title: '房间地址无效', body: '链接里的房间 ID 无法识别，请重新打开完整的邀请链接。' });
+      return;
+    }
+    const entry = vault.get(roomId);
+    const fromFragment = secretFromFragment(window.location.hash.replace(/^#/, ''));
+    const secret = fromFragment ?? (entry ? secretFromFragment(entry.secret) : null);
+    if (!secret) {
+      setFatal({ title: '缺少房间密钥', body: '邀请链接 # 之后的密钥只保存在浏览器本地，这条地址里没有它，因此无法解密。' });
+      return;
+    }
+    vault.put({ roomId, secret, creatorToken: entry?.creatorToken });
+    // The credential is now in the device vault, so drop it from the address bar.
+    window.history.replaceState(null, '', window.location.pathname);
+
+    let client: RoomClient;
+    try {
+      client = RoomClient.fromSecret(clientOptions(), { roomId, secret }, nickState.nick || NICK_FALLBACK);
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      setFatal({
+        title: '端到端加密不可用',
+        body: e?.code === 'CRYPTO_UNAVAILABLE' ? '当前浏览器无法安全生成随机密钥，已阻止创建会话。' : (e?.message ?? '加密初始化失败。')
+      });
+      return;
+    } finally {
+      wipe(secret);
+    }
+    client.creatorToken = entry?.creatorToken ?? '';
+    const store = new RoomStore(client);
+    if (!client.capability.csprng) {
+      store.setBlocked('随机数生成器不可用，已阻止发送任何敏感内容。');
+    }
+    const off = client.on((e) => {
+      if (disposed) return;
+      if (e.type === 'message' && !e.msg.own) notifyEncrypted();
+      if (e.type === 'destroyed') vault.remove(roomId);
+    });
+    setSess({ client, store });
+
+    client
+      .connect()
+      .then(() => client.loadOlder())
+      .catch((err: Error) => {
+        if (disposed) return;
+        const code = err.message;
+        setFatal({ title: '无法进入房间', body: joinErrorMessage(code) });
+        if (code === 'ROOM_NOT_FOUND' || code === 'ROOM_DESTROYED' || code === 'BAD_SECRET' || code === 'BAD_PROOF') {
+          vault.remove(roomId);
+        }
+      });
+
+    return () => {
+      disposed = true;
+      off();
+      store.dispose();
+      client.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomIdProp]);
+
+  // Best-effort departure: the server also has a heartbeat timeout as a backstop.
+  useEffect(() => {
+    const bye = () => sessionRef.current?.client.close();
+    window.addEventListener('pagehide', bye);
+    return () => window.removeEventListener('pagehide', bye);
+  }, []);
+
+  useEffect(() => {
+    setNotifyPerm(currentPermission());
+  }, []);
+
+  useEffect(() => {
+    if (!snap.notice) return;
+    const t = setTimeout(() => sess?.store.clearNotice(), 6000);
+    return () => clearTimeout(t);
+  }, [snap.notice, sess]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), 1600);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  useEffect(() => {
+    const node = composerRef.current;
+    if (!node) return;
+    node.style.height = '0px';
+    node.style.height = `${Math.min(132, Math.max(44, node.scrollHeight))}px`;
+  }, [draft]);
+
+  // ------------------------------------------------------------------- upload
+  useEffect(() => {
+    const client = sess?.client;
+    if (!client || activeUpload.current) return;
+    const job = jobs.find((j) => j.state === 'queued');
+    if (!job) return;
+    activeUpload.current = true;
+    currentUploadKey.current = job.key;
+    setJobs((prev) => prev.map((j) => (j.key === job.key ? { ...j, state: 'uploading', error: undefined } : j)));
+    const slice = async (start: number, length: number) => {
+      const part = job.file.slice(start, start + length);
+      return new Uint8Array(await part.arrayBuffer());
+    };
+    client
+      .upload({ name: job.name, mime: job.file.type || 'application/octet-stream', size: job.file.size, kind: job.kind, slice })
+      .then(() => setJobs((prev) => prev.filter((j) => j.key !== job.key)))
+      .catch((err: Error) =>
+        setJobs((prev) => prev.map((j) => (j.key === job.key ? { ...j, state: 'failed', error: err.message } : j)))
+      )
+      .finally(() => {
+        activeUpload.current = false;
+        currentUploadKey.current = null;
+      });
+  }, [jobs, sess]);
+
+  useEffect(() => {
+    const client = sess?.client;
+    if (!client) return;
+    return client.on((e) => {
+      if (e.type !== 'upload-progress') return;
+      const key = currentUploadKey.current;
+      if (!key) return;
+      setJobs((prev) => prev.map((j) => (j.key === key ? { ...j, sent: e.sent, total: e.total } : j)));
+    });
+  }, [sess]);
+
+  const enqueue = (files: FileList | null, kind: 'file' | 'image') => {
+    if (!files || files.length === 0) return;
+    const next: UploadJob[] = [];
+    for (const file of Array.from(files)) {
+      if (file.size > LIMITS.attachmentBytesMax) {
+        sess?.store.setNotice(`附件超过 ${formatBytes(LIMITS.attachmentBytesMax)} 上限`);
+        continue;
+      }
+      next.push({
+        key: `${kind}-${file.name}-${file.size}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name,
+        size: file.size,
+        kind,
+        file,
+        state: 'queued',
+        sent: 0,
+        total: Math.max(1, Math.ceil(file.size / LIMITS.chunkBytes))
+      });
+    }
+    if (next.length) setJobs((prev) => [...prev, ...next]);
+  };
+
+  // -------------------------------------------------------------------- send
+  const send = async () => {
+    const client = sess?.client;
+    if (!client) return;
+    const body = draft.replace(/\n+$/, '');
+    if (!body.trim()) return;
+    const store = sess?.store;
+    if (blocked) {
+      store?.setBlocked('端到端加密校验未通过，已阻止发送。');
+      return;
+    }
+    if (new TextEncoder().encode(body).length > LIMITS.textPlaintextBytes) {
+      store?.setNotice(`单条消息超过 ${formatBytes(LIMITS.textPlaintextBytes)} 上限，请拆分后发送。`);
+      return;
+    }
+    setDraft('');
+    try {
+      await client.sendText(body);
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      setDraft(body);
+      if (e?.code === 'CRYPTO_UNAVAILABLE') store?.setBlocked('随机数不可用，已阻止发送敏感内容。');
+      else store?.setNotice(e?.message === 'not connected' ? '连接已断开，正在自动重连…' : '发送失败，可在消息上重试。');
+    }
+  };
+
+  const loadOlder = useCallback(async () => {
+    const client = sess?.client;
+    if (!client || busyLoad.current || !snap.hasMore) return;
+    busyLoad.current = true;
+    sess.store.beginLoadOlder();
+    virt.captureAnchor();
+    try {
+      const page = await client.loadOlder();
+      if (page.count === 0) sess.store.markOlderEmpty();
+      virt.onContentGrowth();
+    } catch {
+      sess.store.endLoadOlder();
+      sess.store.setNotice('历史消息加载失败，请重试。');
+    } finally {
+      busyLoad.current = false;
+    }
+  }, [sess, snap.hasMore, virt]);
+
+  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (e.currentTarget.scrollTop < 160) void loadOlder();
+  };
+
+  const doCopy = async (what: string, text: string) => {
+    if (await copyText(text)) setCopied(what);
+  };
+
+  const enableNotify = async () => {
+    const p = await requestPermission();
+    setNotifyPerm(p);
+    setNotifyOptIn(p === 'granted');
+    if (p !== 'granted') sess?.store.setNotice('未开启通知，聊天不受影响。');
+  };
+
+  const destroyRoom = async () => {
+    const client = sess?.client;
+    if (!client) return;
+    setShowDestroy(false);
+    try {
+      await client.destroy();
+    } catch {
+      sess?.store.setNotice('销毁请求失败，请重试。');
+    }
+  };
+
+  const leaveRoom = () => {
+    sess?.client.close();
+    window.location.assign('/');
+  };
+
+  // ------------------------------------------------------------------- render
+  if (fatal) {
+    return (
+      <div className="center-screen">
+        <WarnIcon />
+        <h1>{fatal.title}</h1>
+        <p>{fatal.body}</p>
+        <a className="pill ghost" href="/">
+          返回首页
+        </a>
+      </div>
+    );
+  }
+
+  const client = sess?.client ?? null;
+  const invite = client ? credentialsFromClient(client) : null;
+  const link = client?.publicInvite.link ?? '';
+  const code = client?.publicInvite.code ?? '';
+  const canSend = !!client && snap.status === 'open' && !blocked;
+  const tip = (
+    <SecurityLock
+      secure={secure}
+      open={tipOpen}
+      onToggle={() => setTipOpen((v) => !v)}
+      onClose={() => setTipOpen(false)}
+      engine={client?.capability.engine ?? 'noble-js'}
+      blocked={blocked}
+      copy={securityCopy(secure)}
+    />
+  );
+
+  return (
+    <div className="room">
+      <header className="room-head">
+        {tip}
+        <span className="room-id mono truncate">{client?.publicInvite.roomId ?? '…'}</span>
+        <span className="online">{snap.online} 在线</span>
+        <span className="spacer" />
+        <span className={snap.status === 'open' ? 'status' : 'status bad'}>
+          {snap.status === 'open' ? '' : snap.status === 'connecting' ? '连接中' : '已断开，重连中'}
+        </span>
+        <button type="button" className="icon-btn" aria-label="成员列表" onClick={() => setShowMembers(true)}>
+          <Avatar nick={snap.members[0]?.nick ?? NICK_FALLBACK} small />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="浏览器通知"
+          onClick={() => void enableNotify()}
+          data-perm={notifyPerm}
+        >
+          <BellIcon />
+        </button>
+        <button type="button" className="pill ghost" onClick={() => setShowInvite(true)}>
+          邀请
+        </button>
+        {client?.isCreator ? (
+          <button type="button" className="pill danger" onClick={() => setShowDestroy(true)}>
+            销毁
+          </button>
+        ) : null}
+        <button type="button" className="pill ghost" onClick={leaveRoom}>
+          离开
+        </button>
+      </header>
+
+      {blocked ? (
+        <div className="sec-blocked">
+          <WarnIcon />
+          <span className="truncate">{blocked}</span>
+        </div>
+      ) : null}
+      {snap.notice ? <div className="notice-warn notice-bar">{snap.notice}</div> : null}
+
+      <div className="list-wrap">
+        <div className="list" ref={virt.setScrollElement} onScroll={onListScroll}>
+          <div className="sizer" style={{ height: virt.totalHeight }}>
+            {snap.messages.slice(virt.start, virt.end).map((m, i) => {
+              const index = virt.start + i;
+              return (
+                <div className="row" key={m.id} style={{ transform: `translateY(${virt.offsetOf(index)}px)` }} ref={virt.measure(m.id)}>
+                  <MessageRow
+                    msg={m}
+                    client={client}
+                    meta={m.attachmentId ? snap.metas[m.attachmentId] : undefined}
+                    attachmentId={m.attachmentId}
+                    uploads={snap.uploads}
+                    onCopy={doCopy}
+                    onRetry={(id) => void client?.retry(id)}
+                    onAuthFail={reportAuthFailure}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {snap.loadingOlder ? <div className="loading-older">加载更早的消息…</div> : null}
+        </div>
+        {!virt.nearBottom && snap.messages.length > 0 ? (
+          <button type="button" className="jump-bottom" onClick={virt.scrollToBottom}>
+            回到底部
+          </button>
+        ) : null}
+      </div>
+
+      {jobs.length > 0 ? (
+        <div className="queue">
+          {jobs.map((j) => (
+            <span className="pill ghost" key={j.key}>
+              {j.state === 'failed' ? '失败' : '上传中'} {j.name} {j.total > 0 ? `${Math.min(j.sent, j.total)}/${j.total}` : ''}
+              {j.state === 'failed' ? (
+                <button
+                  type="button"
+                  className="retry"
+                  onClick={() => setJobs((prev) => prev.map((x) => (x.key === j.key ? { ...x, state: 'queued', sent: 0, error: undefined } : x)))}
+                >
+                  重试
+                </button>
+              ) : (
+                <button type="button" className="retry" onClick={() => setJobs((prev) => prev.filter((x) => x.key !== j.key))}>
+                  取消
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="composer">
+        <button type="button" className="icon-btn" aria-label="发送文件" onClick={() => fileInput.current?.click()}>
+          <PaperclipIcon />
+        </button>
+        <button type="button" className="icon-btn" aria-label="发送图片" onClick={() => imageInput.current?.click()}>
+          <ImageIcon />
+        </button>
+        <input ref={fileInput} type="file" hidden multiple onChange={(e) => { enqueue(e.target.files, 'file'); e.target.value = ''; }} />
+        <input
+          ref={imageInput}
+          type="file"
+          hidden
+          multiple
+          accept="image/*"
+          onChange={(e) => { enqueue(e.target.files, 'image'); e.target.value = ''; }}
+        />
+        <div className="input-field">
+          <textarea
+            ref={composerRef}
+            value={draft}
+            rows={1}
+            placeholder={blocked ? '加密校验失败，已停止发送' : '输入消息，Enter 发送，Shift + Enter 换行'}
+            aria-label="消息输入框"
+            disabled={!canSend}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+        </div>
+        <button type="button" className="send" onClick={() => void send()} disabled={!canSend || !draft.trim()}>
+          发送
+        </button>
+      </div>
+
+      {showInvite && invite ? (
+        <Modal title="邀请别人加入" onClose={() => setShowInvite(false)}>
+          <span className="label">任何拿到完整链接的人都能加入并解密，请按不记名凭证保管。</span>
+          <div className="value-box">
+            <div className="share-row">
+              <span className="v truncate">{link}</span>
+              <button type="button" className="copy" onClick={() => void doCopy('link', link)}>
+                {copied === 'link' ? '已复制' : '复制链接'}
+              </button>
+            </div>
+            <div className="share-row">
+              <span className="v accent truncate">{code}</span>
+              <button type="button" className="copy" onClick={() => void doCopy('code', code)}>
+                {copied === 'code' ? '已复制' : '复制口令'}
+              </button>
+            </div>
+          </div>
+          {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => void navigator.share?.({ title: 'PoofSpace 聊天室', url: link }).catch(() => undefined)}
+            >
+              分享
+            </button>
+          ) : null}
+          <span className="cap">链接中 # 之后的秘密只在浏览器本地使用，不会发送给服务器，也不会出现在服务器日志里。</span>
+        </Modal>
+      ) : null}
+
+      {showMembers ? (
+        <Modal title={`在线成员 ${snap.online}`} onClose={() => setShowMembers(false)}>
+          <div className="list-plain">
+            {snap.members.map((m) => (
+              <div className="vault-item" key={m.slot}>
+                <Avatar nick={m.nick} small />
+                <div className="col">
+                  <span className="rid truncate">{m.nick}</span>
+                  <span className="when">{m.online ? '在线' : '离开'}{m.isCreator ? ' · 创建者' : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="row2">
+            <button type="button" className="btn btn-ghost" onClick={() => setShowNick(true)}>
+              修改我的昵称
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showNick ? (
+        <NicknameDialog
+          nick={nickState.nick}
+          onClose={() => setShowNick(false)}
+          onApply={(next) => {
+            nickState.apply(next);
+            sess?.client.setNickname(next);
+          }}
+        />
+      ) : null}
+
+      {showDestroy ? (
+        <DestroyDialog onClose={() => setShowDestroy(false)} onConfirm={() => void destroyRoom()} />
+      ) : null}
+    </div>
+  );
+}
+
+function SecurityLock({
+  secure,
+  open,
+  onToggle,
+  onClose,
+  engine,
+  blocked,
+  copy
+}: {
+  secure: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  engine: string;
+  blocked: string | null;
+  copy: string;
+}) {
+  return (
+    <div className={open ? 'sec open' : 'sec'} onMouseLeave={onClose}>
+      <button
+        type="button"
+        className="sec-btn"
+        aria-label="加密状态"
+        aria-expanded={open}
+        onClick={onToggle}
+        onBlur={onClose}
+      >
+        {blocked ? <WarnIcon /> : <LockIcon />}
+      </button>
+      <div className="sec-tip" role="tooltip">
+        <span className={blocked ? 'lbl bad' : 'lbl ok'}>
+          {blocked ? `加密校验失败 · 已阻止发送` : `应用层端到端加密已启用 · ${engine}`}
+        </span>
+        <p>{copy}</p>
+        {blocked ? <p className="notice-error">{blocked}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function DestroyDialog({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => void }) {
+  const [ack, setAck] = useState(false);
+  return (
+    <Modal title="销毁聊天室" onClose={onClose}>
+      <span className="label">销毁会删除服务端保存的全部密文历史与附件分片，并结束所有连接。</span>
+      <span className="notice-warn">无法绝对清除对方已经截图、复制或下载的内容，销毁只保证受控存储被清理且访问立即失效。</span>
+      <label className="ack">
+        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+        <span>我已确认：房间销毁后不能恢复，旧链接与旧邀请码都会立即失效。</span>
+      </label>
+      <div className="row2">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>
+          取消
+        </button>
+        <button type="button" className="btn btn-danger" disabled={!ack} onClick={onConfirm}>
+          确认销毁
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function MessageRow({
+  msg,
+  client,
+  meta,
+  attachmentId,
+  uploads,
+  onCopy,
+  onRetry,
+  onAuthFail
+}: {
+  msg: UiMsg;
+  client: RoomClient | null;
+  meta: AttachmentMeta | undefined;
+  attachmentId: string | undefined;
+  uploads: RoomSnapshot['uploads'];
+  onCopy: (key: string, text: string) => void;
+  onRetry: (clientMsgId: string) => void;
+  onAuthFail: () => void;
+}) {
+  const [full, setFull] = useState(false);
+  const long = isLongText(msg.text);
+  const body = long && !full ? excerpt(msg.text) : msg.text;
+
+  return (
+    <div className={msg.own ? 'msg own' : 'msg'}>
+      <Avatar nick={msg.senderNick || NICK_FALLBACK} small />
+      <div className="col">
+        <span className="author truncate">{msg.own ? '我' : msg.senderNick}</span>
+        <div className="bubble">
+          {msg.kind === 'text' ? (
+            <>
+              <p className="text-block">{body}</p>
+              {long ? (
+                <button type="button" className="expand" onClick={() => setFull(true)}>
+                  {full ? '收起' : '展开全文'}
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {msg.kind === 'image' && client && attachmentId ? (
+            <ImageBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
+          ) : null}
+          {msg.kind === 'file' && client && attachmentId ? (
+            <FileBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
+          ) : null}
+          {msg.kind !== 'text' && !meta ? (
+            <span className="thumb-placeholder">{uploads[msg.attachmentId ?? ''] ? '加密上传中' : '准备加载…'}</span>
+          ) : null}
+        </div>
+        <div className="tail">
+          <span className="time">{formatTime(msg.at)}</span>
+          {msg.state === 'sending' ? <span className="state-sending">发送中</span> : null}
+          {msg.state === 'failed' ? <span className="state-failed">发送失败{msg.error ? ` · ${msg.error}` : ''}</span> : null}
+          {msg.state === 'failed' && msg.own ? (
+            <button type="button" className="retry" onClick={() => onRetry(msg.id)}>
+              重试
+            </button>
+          ) : null}
+          {msg.kind === 'text' ? (
+            <button type="button" className="retry" onClick={() => onCopy(msg.id, msg.text)}>
+              复制
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {full ? (
+        <Modal title="完整消息" wide onClose={() => setFull(false)}>
+          <p className="full-text">{msg.text}</p>
+          <div className="row2">
+            <button type="button" className="btn btn-ghost" onClick={() => setFull(false)}>
+              关闭
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => onCopy(`${msg.id}-full`, msg.text)}>
+              全选并复制
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function progress(msg: UiMsg, uploads: RoomSnapshot['uploads']): string | null {
+  if (msg.state !== 'sending' || !msg.attachmentId) return null;
+  const u = uploads[msg.attachmentId];
+  if (!u || u.total <= 0) return '加密中…';
+  return `上传 ${Math.floor((u.sent / u.total) * 100)}%`;
+}
+
+function ImageBody({
+  client,
+  id,
+  meta,
+  onAuthFail,
+  uploading
+}: {
+  client: RoomClient;
+  id: string;
+  meta: AttachmentMeta | undefined;
+  onAuthFail: () => void;
+  uploading: string | null;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
+  const [zoom, setZoom] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!meta) return;
+    retain(id);
+    let alive = true;
+    thumbnailUrl(client, id, meta)
+      .then((u) => {
+        if (!alive) return;
+        if (!u) setRefused(true);
+        else setUrl(u);
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setRefused(true);
+        if (err instanceof DecryptError) onAuthFail();
+      });
+    return () => {
+      alive = false;
+      release(id);
+    };
+  }, [client, id, meta, onAuthFail]);
+
+  if (uploading) return <span className="thumb-placeholder">{uploading}</span>;
+  if (refused) return <span className="thumb-placeholder">密文认证失败，已拒绝渲染</span>;
+  if (!meta) return <span className="thumb-placeholder">准备加载…</span>;
+  if (!url) return <span className="thumb-placeholder">缩略图生成中…</span>;
+  return (
+    <>
+      <img
+        className="thumb"
+        src={url}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onClick={() => {
+          retain(id);
+          fullUrl(client, id, meta)
+            .then((u) => u && setZoom(u))
+            .catch((err: unknown) => {
+              if (err instanceof DecryptError) onAuthFail();
+            });
+        }}
+      />
+      {zoom ? (
+        <div className="lightbox" onClick={() => { dropFull(id); setZoom(null); }}>
+          <img src={zoom} alt="" />
+          <button type="button" className="icon-btn" aria-label="关闭预览">
+            <CloseIcon />
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function FileBody({
+  client,
+  id,
+  meta,
+  onAuthFail,
+  uploading
+}: {
+  client: RoomClient;
+  id: string;
+  meta: AttachmentMeta | undefined;
+  onAuthFail: () => void;
+  uploading: string | null;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const name = meta?.name ?? '加密文件';
+  return (
+    <div className="file">
+      <FileIcon />
+      <div className="meta">
+        <span className="name truncate">{name}</span>
+        <span className="when mute">{meta ? formatBytes(meta.size) : '元数据解密中…'}</span>
+        {uploading ? (
+          <>
+            <div className="bar">
+              <div className="bar-fill" style={{ width: '60%' }} />
+            </div>
+            <span className="when">{uploading}</span>
+          </>
+        ) : null}
+        {error ? <span className="notice-error">{error}</span> : null}
+      </div>
+      {meta && !uploading ? (
+        <button
+          type="button"
+          className="copy"
+          disabled={saving}
+          onClick={() => {
+            setSaving(true);
+            saveFile(client, id, meta)
+              .catch((err: unknown) => {
+                if (err instanceof DecryptError) {
+                  setError('密文认证失败，文件已被拒绝下载。');
+                  onAuthFail();
+                } else {
+                  setError('下载失败，请稍后重试。');
+                }
+              })
+              .finally(() => setSaving(false));
+          }}
+        >
+          {saving ? '解密中' : <DownloadIcon />}
+          {saving ? '' : '下载'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function isLongText(text: string): boolean {
+  if (text.length > EXCERPT_CHARS) return true;
+  let n = 0;
+  for (const ch of text) if (ch === '\n') n++;
+  return n >= EXCERPT_LINES;
+}
+
+function excerpt(text: string): string {
+  const byLines = text.split('\n');
+  if (byLines.length > EXCERPT_LINES) return `${byLines.slice(0, EXCERPT_LINES).join('\n')}\n…`;
+  if (text.length > EXCERPT_CHARS) return `${text.slice(0, EXCERPT_CHARS)}…`;
+  return text;
+}
