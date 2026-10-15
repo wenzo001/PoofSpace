@@ -1,0 +1,79 @@
+# PoofSpace behind Nginx: TLS terminated here, plain http to the Node process.
+#
+# Two things this file exists to get right:
+#   1. /ws must be proxied as an HTTP Upgrade. Without Upgrade/Connection headers the
+#      WebSocket never opens and the room looks like it "does not receive messages".
+#   2. X-Forwarded-* must be set HERE and TRUSTED THERE. The app only reads them when
+#      TRUST_PROXY=1; a proxy that is not in front of the app (or an attacker who can
+#      reach the Node port directly) must not be able to forge the invite-link origin
+#      or the "is this https?" answer. Keep the Node port bound to a private interface.
+#
+# The invite secret lives in the URL fragment (#...), which browsers never send to any
+# server, so it cannot appear in this access log. Do not add $request_uri to a custom
+# log_format that is shipped somewhere less trustworthy than this host.
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+upstream poofspace {
+  server 127.0.0.1:3000;
+  keepalive 16;
+}
+
+server {
+  listen 80;
+  server_name chat.example.com;
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name chat.example.com;
+
+  ssl_certificate     /etc/nginx/tls/chat.example.com.crt;
+  ssl_certificate_key /etc/nginx/tls/chat.example.com.key;
+  ssl_protocols       TLSv1.2 TLSv1.3;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache   shared:SSL:10m;
+  ssl_session_timeout 1d;
+
+  # The app sets its own CSP, HSTS, referrer-policy and X-Frame-Options per request.
+  # Nothing security-related is added or overridden here, so the two layers cannot
+  # disagree about what the connection actually is.
+  proxy_set_header Host              $host;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-Host  $host;
+
+  # The Node server streams nothing it wants buffered; disable proxy buffering so the
+  # first byte of an upload response is not held back by nginx.
+  proxy_http_version 1.1;
+  proxy_buffering    off;
+  proxy_request_buffering off;
+
+  location / {
+    proxy_pass http://poofspace;
+    proxy_read_timeout  75s;
+    proxy_send_timeout  75s;
+  }
+
+  location = /ws {
+    proxy_pass http://poofspace;
+    proxy_set_header Upgrade    $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    # The client pings every 15s and the server allows 25s of grace, so any idle timeout
+    # above ~1 minute already covers normal operation; 300s keeps a backgrounded tab from
+    # being dropped by nginx between heartbeats.
+    proxy_read_timeout  300s;
+    proxy_send_timeout  300s;
+  }
+
+  # Attachment uploads are chunked and the body is already ciphertext. A chunk is at most
+  # 4 MiB (CHUNK_BYTES_MAX), so 8m leaves room for the base64 framing; set lower and nginx
+  # rejects a chunk with 413, which the client then retries forever.
+  client_max_body_size 8m;
+}

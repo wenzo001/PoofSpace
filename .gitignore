@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+release/
+data/
+.env
+.env.local
+*.log
+.next-env.d.ts
+next-env.d.ts
+.workbuddy/
+.turbo/
+coverage/
+test-output/
+scratch/
+tsconfig.tsbuildinfo

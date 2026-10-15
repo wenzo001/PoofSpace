@@ -1,0 +1,12 @@
+# The tree is authored on Windows and verified in Linux CI. Normalise to LF in the repository so
+# a clone gets the same bytes the acceptance table was run against, and so line endings never show
+# up as a diff.
+* text=auto eol=lf
+*.docx binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.node binary
+*.wasm binary
+*.gz binary
+*.tgz binary

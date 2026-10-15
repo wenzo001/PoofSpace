@@ -1,0 +1,43 @@
+name: CI
+
+# What this workflow does and does not prove.
+#
+# It runs the checks that need nothing but Node: typecheck on both projects, and the full
+# vitest suite (unit, integration, security, lifecycle, storage, capacity, admin, perf).
+#
+# It does NOT run `npm run gates`. That table needs a machine this workflow does not have:
+# PM2 installed (B4), a real chromium plus a routable non-loopback IPv4 address so that
+# `http://<ip>:<port>` is genuinely *not* a secure context (B6/B7/B9/B10, T5), and openssl to
+# mint a IP-SAN certificate. Those legs are the operator's acceptance run and are recorded in
+# docs/TEST-REPORT.md; a green CI here is a floor, not that verdict, and this file says so
+# rather than letting a passing badge stand in for the table.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.9.0', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install the exact locked dependency tree
+        run: npm ci
+      - name: Typecheck (client + server projects)
+        run: npm run typecheck
+      - name: Build (client, server, Next production runtime)
+        run: npm run build
+      - name: Audit the deployable artifact without publishing it
+        run: npm run release -- --dry-run
+      - name: Full test suite
+        run: npm test
