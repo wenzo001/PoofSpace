@@ -153,6 +153,15 @@ Everything here came out of using the app in a browser, not out of the specifica
   round's corner term read the wrong node — it went red on the fixed build (`thumbnail ... radius
   0px vs bubble 16px`) before it was re-pointed, and that red is what proved the term had been
   encoding a relationship between two owners rather than a fact about one.
+- An eighth leg joined while auditing the release rather than while building it: the second half of
+  "scroll to the bottom when there is new content" — a message arriving *from someone else* while the
+  reader is already at the bottom — had no judgement at all. The behaviour was implemented and the
+  neighbouring leg looked adjacent, but that leg judges relative movement (the bottom may step
+  forward by the arriving row, never backwards), so a pin that does nothing leaves its arithmetic
+  intact. Green: `0px from the bottom before, 0px after four inbound messages`; red under the knife
+  (the pin's assignment turned into a no-op): `46px before, 366px after, the last one on screen=false`.
+  The intended second witness — that the jitter leg stays green under the same cut — did not hold:
+  it failed too, by a setup timeout that is D27's usual signature, so no independence is claimed.
 - One instrument bug found and fixed while doing that: the nickname leg counted the peer's naming gate
   the moment the page arrived, and the gate appears one commit after hydration. Waiting for it instead
   of sleeping turned `peer gate=0` into a stable green — the reading that looked like a product defect
@@ -168,9 +177,9 @@ Everything here came out of using the app in a browser, not out of the specifica
 - `npm test` runs the suite in two invocations so the 100-member lane gets its own process, and the
   test bed retries a WebSocket *connect* that the operating system refused — never a `ROOM_FULL` or
   any product refusal (proved by re-refusing every join and watching the lane go red).
-- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 28 browser
-  legs. Mutation evidence per judgement — thirteen knives across the release (seven in the fourth
-  round, five in the fifth, one here), each proven red at the layer the harness actually boots, and
+- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 29 browser
+  legs. Mutation evidence per judgement — fourteen knives across the release (seven in the fourth
+  round, five in the fifth, two here), each proven red at the layer the harness actually boots, and
   one judgement whose red came from the unfixed build itself rather than from a cut — plus three
   earlier knives that came back as equivalent mutations and are recorded as gaps rather than as
   passes, in `docs/TEST-REPORT.md` §7.7, §7.9, §7.11 and §7.12 and `docs/DEBT.md` D21–D31.

@@ -64,11 +64,15 @@
 七条要求逐条的读数与五把新刀记在 **§7.11**；`anchorAt` 每次滚动 O(n) 这条 review 时发现的形状登记成 **D31**，
 没有顺手改 —— 它现在没有任何读数说明有多疼，改它得先能测出来。
 
-**第六轮（同日更晚；起因不是新截图，是我自己去量渲染出来的像素）**：浏览器线 27 → **28 条腿**，
-`scratch/lane-28b.log` = **56 行全 PASS = 28 条腿 × 两个来源，`LANE_EXIT=0`**。改的是一处真缺陷：
-图片消息是全场唯一"框有两个主人"的消息 —— 气泡画一圈 1px 描边，缩略图在里面再画一圈，两圈相距
-10px/5px，各自还带一个 16px 圆角。逐条读数、为什么在 1280px 与 390px 两个宽度各量一遍、以及这次
-改动怎样把上一轮那条圆角判据读红，记在 **§7.12**；本轮之后整台面的读数按收尾顺序记在 v1.0.1 标签注解里。
+**第六轮（同日更晚；起因不是新截图，是我自己去量渲染出来的像素，收尾时又补了一次逐条对账）**：
+浏览器线 27 → **29 条腿**，`scratch/lane-29a.log` = **58 行全 PASS = 29 条腿 × 两个来源，`LANE_EXIT=0`**
+（中途那一遍 `lane-28b` 是 28 条腿 56 行全绿，它判的是补第八条腿**之前**的树，两个数都留着）。
+改的是一处真缺陷：图片消息是全场唯一"框有两个主人"的消息 —— 气泡画一圈 1px 描边，缩略图在里面再画一圈，
+两圈相距 10px/5px，各自还带一个 16px 圆角。第二处不是缺陷而是**判据缺口**：把"发出新内容要滚到底"
+这条要求逐半对账时发现，"别人发来我也在底部"这一半**根本没有判据**（行为是实现了的），补成第八条腿。
+逐条读数、为什么在 1280px 与 390px 两个宽度各量一遍、这次改动怎样把上一轮那条圆角判据读红、
+以及那把"想让相邻腿当独立证人"的刀怎样没证成，记在 **§7.12**；本轮之后整台面的读数按收尾顺序记在
+v1.0.1 标签注解里。
 
 规范 §13 的十条验收标准与补充规范 §8 的三族验收测试都有判据覆盖；**尚未做到或只做到一部分的事全部列在
 `docs/DEBT.md`**（D15–D19 是这一轮新登记的），本报告不把它们说成已完成（§5 给了摘要）。
@@ -675,6 +679,12 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 | --- | --- | --- | --- |
 | 图片消息再紧凑、风格与气泡统一 | 气泡 190×124 套着 168×112 的缩略图：气泡一圈 1px 描边，缩略图在里面又画一圈，两圈相距 10px/5px，各自还带一个 16px 圆角 ⇒ 只有图片消息是"卡纸装裱"，文字与文件卡都是一圈 | `wide: bubble−thumbnail = 2x2px, bubble padding 0px/0px/0px/0px, strokes 1, radius 16px, clipped true; at 390px: 2x2px, padding 0px/0px/0px/0px, strokes 1, clipped true`（2x2 就是那唯一一圈 1px 描边） | 撤掉"缩略图与占位框不再描边"那两行 ⇒ 新腿读到 `strokes 2`（padding、delta、裁切全对，只有第二圈回来了），同时把上一轮那条圆角判据也读回 `16px` ⇒ 两条腿各自红、红在各自的项上 |
 | 上一轮那条圆角判据被这次改动改红 | 判据写的是"缩略图圆角 == 气泡圆角"，框搬了主人之后两端不再有意义：产品对了、判据读错节点 | 产品改完、判据未改时 `scratch/lane-28a.log` 那遍就是红的：`thumbnail 168x112 radius 0px vs bubble 16px` | 不删判据，把它重指为"只有气泡带圆角"（`thumbnail radius === 0px` 且 `bubble radius === 16px`）。重指之后同一把刀（上面那两行）也让它红：`carries no radius (16px) while the bubble carries 16px (16px)` |
+| 收尾对账："收到新消息也滚到最底"这一半有没有判据 | **没有**。行为在 `virtuoso.ts` 里实现了（`if (pinnedRef.current) node.scrollTop = node.scrollHeight`），但全树 28 条腿里没一条读它。相邻那条 `pinned list holds on incoming` 看着像、其实不是：它判的是**相对位移**（底部只许按到达行的行高前进、不许后退），把 pin 换成空操作之后它的算术照样成立 | 补成第八条腿：`reader was 0px from the bottom before, 0px after four inbound messages; the last one on screen=true` | 把那一行的赋值改成 `node.scrollTop = node.scrollTop`（先试的 `if (false && pinnedRef.current)` 被 tsc 拦下：`'node' is possibly 'null'` —— 变异本身没通过编译，不算证人）⇒ 该腿红：`46px before, 366px after, the last one on screen=false` |
+
+**这把刀本来还想多证一件事，没证成**：我预期同一刀下 `pinned list holds on incoming` 会保持绿，
+好证明两条腿各管一条臂、互不摊平。实际它**也红了**，红在 `page.waitForSelector: Timeout 30000ms`
+—— 那是 D27 那条抖动腿一贯的签名，不是这条判据自己的断言。没有对照跑（不切产品、只重跑它），
+所以这一刀对两条腿的影响无法归因，"两臂各自独立"这个说法**不写进结论**。
 
 **为什么在两个宽度各量一遍**：样式表更下方有一条 `@media (max-width: 390px)` 重写 `.bubble` 的 padding，
 与 `.bubble-image` 同特异度且写在后面 ⇒ 只在桌面宽度成立的框修复，手机上等于没修。修复因此用
@@ -684,9 +694,12 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 空白处、"展开全文"弹窗里那颗白色主按钮的视觉重量——两处只有截图证据，没有判据规定它该长什么样。
 "原生感/视觉弱化"这一族仍然没有可证伪判据，本轮没有改变这件事。
 
-台面计数：本轮之后浏览器线 **28 条腿**（`scratch/lane-28b.log`：56 行全 PASS = 28 × 两个来源，`LANE_EXIT=0`）。
-它判定的是"产品改完 + 判据重指之后"的那一棵树，编译记在 `scratch/build-final.log`；两次下刀的读数分别在
-`scratch/knife-imageframe.log`（未修产品：`22x12px / padding 5px/10px/5px/10px / strokes 2 / clipped false`）与
-`scratch/knife2-picker.log`、`scratch/knife2-imageframe.log`（撤掉缩略图那两行：一条读 `carries no radius (16px)`、
-一条读 `strokes 2`）。整台面 16 道门的重认证按收尾顺序（文档 → 提交 → 打包 → 一遍台面）记在 v1.0.1 标签注解里。
+台面计数：本轮之后浏览器线 **29 条腿**（`scratch/lane-29a.log`：58 行全 PASS = 29 × 两个来源，`LANE_EXIT=0`；
+补第八条腿之前的那一遍是 `scratch/lane-28b.log`：56 行全 PASS，两个数都留着，各判各的树）。
+框这一处判定的是"产品改完 + 判据重指之后"的那一棵树，编译记在 `scratch/build-final.log`；两次下刀的读数分别在
+`scratch/knife-imageframe.log`（未修产品：`22x12px / padding 5px/10px/5px/10px / strokes 2 / clipped false`）、
+`scratch/knife2-picker.log` 与 `scratch/knife2-imageframe.log`（撤掉缩略图那两行：一条读 `carries no radius (16px)`、
+一条读 `strokes 2`）。跳底那一处判定的是补腿之后的树，它的刀记在 `scratch/knife3-inbound.log`
+（`46px before, 366px after, the last one on screen=false`），同刀的 `scratch/knife3-pinned.log` 因上一条所说
+不做归因。整台面 16 道门的重认证按收尾顺序（文档 → 提交 → 打包 → 一遍台面）记在 v1.0.1 标签注解里。
 

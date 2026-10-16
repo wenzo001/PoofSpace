@@ -129,7 +129,7 @@ was deliberately broken and the gate was required to go red — and skipped chec
 passing (`SKIP` is a distinct verdict, and the strict table fails on it).
 
 Current state: **16 gates PASS / 0 FAIL / 0 SKIP** (`npm run gates`), 157 automated checks, plus a
-real-browser lane (28 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
+real-browser lane (29 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
 non-secure context, where `crypto.subtle` is absent and the bundled pure-JS AES-GCM path is used) and
 real TLS. The 100-member lane has died before printing a single assertion on roughly half of the
 full-table runs on the development machine (`0 files, 0 tests` + `ERR_IPC_CHANNEL_CLOSED`); a crashed
