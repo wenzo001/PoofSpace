@@ -22,4 +22,5 @@ tsconfig.tsbuildinfo
 # `node scripts/md-to-docx.mjs`（它会从同目录的 .md 现生成）。
 # 注意：main→internal-deploy 合并时会把公司线上这几个 .docx 也一并删掉（这里就是那条删除），
 # 这是有意的——公司线要 Word 版同样用上面那条命令现生成，不要提交回仓库。
-docs/*.docx
+# 生成器按源文件同目录落盘，所以 README/CHANGELOG 那两份落在仓库根 —— 规则要盖住整棵树。
+*.docx
