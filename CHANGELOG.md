@@ -104,8 +104,7 @@ Everything here came out of using the app in a browser, not out of the specifica
   multi-file stall was named (`queue="排队中 剪贴板里的文件.txt 0/1块"`) rather than guessed at.
 - The lane boots with `MAX_ROOMS=80`: its own legs create more rooms than the shipped default of 20,
   and a capacity ceiling reached by the harness is not a product refusal.
-
-- The real-browser lane grew from 10 legs to 16: first-run naming, an uploaded image reaching the
+- The 10→16 step of that growth covered first-run naming, an uploaded image reaching the
   other device, joined rooms appearing as history, both devices landing on the home page after a
   destroy, the copy control judged on what the clipboard actually received, and the parked list
   judged frame by frame.

@@ -33,6 +33,11 @@ npm run release     # = node scripts/build-release.mjs
 `sourceNewestMs`）。`npm run gates` 的 B2/B3/B5 会拒收"没有源戳"或"打包之后源码又动过"的产物 ——
 所以**改了 `src/` 就必须重新 `npm run release`**，否则那三条不会认这个包。
 
+随包发出去的文档由 `SHIPPED_DOCS` 一处决定：`LICENSE`、中英 README、`CHANGELOG.md`、
+`docs/DEPLOYMENT.md`、`docs/SECURITY.md`、`docs/TEST-REPORT.md`、`docs/ARCHITECTURE.md`、`docs/DEBT.md`。
+审计还会检查这组文档**在自己的文字里指向的 docs 文件也在包里** —— 说明书让运维去看欠账台账，
+包里却没有那本台账，就算审计失败。
+
 在目标服务器上：
 
 ```bash

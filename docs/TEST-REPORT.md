@@ -1,6 +1,6 @@
 # PoofSpace 测试报告
 
-- 日期：2026-10-15
+- 日期：2026-10-15 起，最后两轮（用户手测的八条 + 交付前收尾）在 2026-10-16
 - 现场：Windows 10 x64（10.0.26300）、Node.js v24.16.0（abi 137）、`npm run gates` / `npm run release` / vitest / 真实 chromium
 - 仓库：`D:\code\poofspace`。各轮报告的提交状态以 §7.6 结尾为准：补充规范与开源发布这两轮**经用户明确授权后**建立了本地提交与注解标签 `v1.0.0`；**建仓与推送由执行人自己做**（他选的正是"只做本地 commit + tag"）。在此之前，本报告写作时仓库为 0 commit、全部路径 untracked。
 - 判定口径：**PASS / FAIL / SKIP 三态；SKIP 永远不算通过**。下面每一条 PASS 后面跟的是它自己的读数，
@@ -35,6 +35,14 @@
 `ACTIVE → IDLE_GRACE(300 s) → DESTROYING → DESTROYED`、`MAX_ROOMS=20` 的名额账、销毁后不留房间记录、
 超出 `DELETE` 的存储清理（WAL/SHM/自由页）、以及只在本地跑的两条运维命令。新增的 30 条治理判据与
 它们各自的变异证人见 **§7**；上一轮（正文规范 + 部署补充规范）的读数仍留在 §1–§6，未被这一轮推翻。
+
+**交付前收尾（同日更晚，打包与认证口径）**：整台面再跑一遍 `scratch/gates-H.log` = **16/16 PASS、0 FAIL、0 SKIP**、
+`GATES_EXIT=0`（B1 17.6 s、B6 98.7 s、B4 19.9 s、B8 15.5 s、T1 62、T2 26、T3 30、T4 9（68.5 s，
+台面自己打印 `machine before[node=12 chrome=0 memFreeMiB=5781/32519] after[…5556…] exit=0`）、T5 21 条腿、T6 30 ⇒ 合计 157 条）。
+这一遍判的包是 `builtAt=2026-10-16T10:15:09.887Z`、`nextBuildId=tl6vFQcpRtsH_IQY5mvaC` 那一份，
+而它自己的 B1 又把这棵源码重编译成了另一份 `-B9qQbv70PAzhg5jAT6av` —— §7.10 把"台面先重建、再判已在盘上的那一包"
+这个结构性错位写清楚了，不靠调顺序糊过去。收尾这一轮另外做的事：把包里指向却没随包出去的
+`docs/DEBT.md`、`docs/ARCHITECTURE.md` 补进清单，并给打包审计加了一条文档闭包判据（§7.10）。
 
 规范 §13 的十条验收标准与补充规范 §8 的三族验收测试都有判据覆盖；**尚未做到或只做到一部分的事全部列在
 `docs/DEBT.md`**（D15–D19 是这一轮新登记的），本报告不把它们说成已完成（§5 给了摘要）。
@@ -581,6 +589,13 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
   所以它的证人是上面这两次打包，不是台面。
 - 版本与标签：`package.json` 停在 `1.0.1`，注解标签 `v1.0.1` 移到本轮最后一条提交（它从未推送过，
   移动不重写任何公开历史）；**公开的 `v1.0.0` 不动**，仍指向 `e1958a5`。
+- **交付包判完就不再往报告里回填**：把文档同步进包里要用 `--no-build` 重打包，重打包又会改掉
+  "判定对象是那一次包"这句话所指的字节 —— 追着自己的尾巴转。所以**最后那遍整台面（判的就是交付出去的那一包）
+  的读数记在 `v1.0.1` 的标签注解里**，本报告只留 §0 那两遍（`gates-G` / `gates-H`）。这样回填不会翻案：
+  台面没有任何一腿读文档（`grep -n "README\|CHANGELOG\|TEST-REPORT\|DEBT\|SECURITY.md\|docs/" scripts/run-gates.mjs`
+  打空，`grep -rn "README\|docs/\|CHANGELOG\|TEST-REPORT" tests/` 同样打空），
+  而 B3 那条新鲜度判据只看 `src/` + 配置文件（`scripts/stamp.mjs:36`），实测
+  `srcNow == packed == 2026-10-16T06:49:24.782Z`，所以"写完文档再打包"这件事不会把任何一条腿变红。
 - Word 交付物：`docs/*.docx` 不进 git（`.gitignore:25`），本机用 `node scripts/md-to-docx.mjs <文件…>` 现生成。
 - 建仓与推送仍归执行人：公开线 `git push origin main && git push origin v1.0.1`；
   公司线 `git checkout internal-deploy && git merge main && git push lc internal-deploy`（单向，main 不含公司配置）。
