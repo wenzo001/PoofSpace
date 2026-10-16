@@ -1170,7 +1170,13 @@ async function firstRunNicknameAndIdentity(browser, origin, emit) {
     await a.page.keyboard.press('Enter');
 
     await gotoPage(b, link);
-    const bGated = await b.locator('.modal button.btn-primary', { hasText: '确认并进入' }).count();
+    // Waited for, not counted on arrival: the gate appears one commit after hydration, and an
+    // immediate count turned a merely slow page into "the peer was never asked to name itself".
+    const bGated = await b
+      .locator('.modal button.btn-primary', { hasText: '确认并进入' })
+      .waitFor({ timeout: 15000 })
+      .then(() => 1)
+      .catch(() => 0);
     await acceptNickname(b);
     await b.waitForSelector('.composer textarea', { timeout: 30000 });
     const bNick = await b.evaluate(() => JSON.parse(localStorage.getItem('poofspace.prefs.v1') || '{}').nick ?? null);
@@ -1244,7 +1250,7 @@ async function imageReachesPeerInOneBox(browser, origin, emit) {
       throw new Error(`${label}: ${String(err.message || err).split('\n')[0].slice(0, 90)}`);
     });
 
-    await host.page.locator('input[type=file][accept="image/*"]').setInputFiles({ name: 'probe.png', mimeType: 'image/png', buffer: png });
+    await host.page.locator('.composer input[type=file]').first().setInputFiles({ name: 'probe.png', mimeType: 'image/png', buffer: png });
     await step('the uploader never rendered its own image', host.page.waitForSelector('.msg.own img.thumb', { timeout: 30000 }));
 
     await gotoPage(g, link);
@@ -1788,6 +1794,326 @@ async function longMessageModalScrollsInPlace(browser, origin, emit) {
   }
 }
 
+/* ===== 2026-10-16 第五轮：弹窗层级、一个入口、跳底、人数快照 =====
+   全部来自用户手测。每条腿各自下刀，见 docs/TEST-REPORT.md。 */
+
+async function solidPng(page, color) {
+  const dataUrl = await page.evaluate((fill) => {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext('2d');
+    if (!g) return '';
+    g.fillStyle = fill;
+    g.fillRect(0, 0, 64, 64);
+    return c.toDataURL('image/png');
+  }, color);
+  const buf = Buffer.from(String(dataUrl).split(',')[1] ?? '', 'base64');
+  if (buf.length < 80) throw new Error(`the generated PNG is ${buf.length} bytes - the fixture, not the app, is broken`);
+  return buf;
+}
+
+async function imagePreviewIsTheTopLayer(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const png = await solidPng(a.page, '#2a8');
+    await a.page.locator('.composer input[type=file]').first().setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png });
+    await a.page.waitForSelector('.msg.own img.thumb', { timeout: 45000 });
+    // A row after the image is what used to paint on top of the preview: the row carries a
+    // transform, so the preview's own z-index never left that row's stacking context.
+    await a.page.locator('.composer textarea').fill('预览之后还有一条');
+    await a.page.keyboard.press('Enter');
+    await a.page.waitForSelector('.bubble', { timeout: 30000 });
+    await a.page.locator('.msg.own img.thumb').click();
+    await a.page.waitForSelector('.lightbox', { timeout: 20000 });
+    const g = await a.page.evaluate(() => {
+      const lb = document.querySelector('.lightbox');
+      if (!lb) return { present: false };
+      const r = lb.getBoundingClientRect();
+      const hit = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(window.innerHeight / 2));
+      return {
+        present: true,
+        onBody: lb.parentElement === document.body,
+        covers: lb.contains(hit),
+        hit: hit ? `${hit.tagName.toLowerCase()}.${String(hit.className).split(' ')[0]}` : 'none',
+        rows: document.querySelectorAll('.row').length
+      };
+    });
+    const ok = g.present === true && g.onBody === true && g.covers === true;
+    record(
+      'the image preview is the top layer over the chat',
+      ok ? 'PASS' : 'FAIL',
+      `portal to body=${g.onBody}; the centre pixel resolves inside the preview=${g.covers} (hit ${g.hit}) with ${g.rows} list rows mounted; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the image preview outranks the chat it came from`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+async function dialogStaysPutWhileTheListMoves(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    // A bare "waitForSelector timed out" is not a reading, so every wait here names the thing it
+    // was waiting for and dumps what the page actually holds.
+    const want = async (label, p) => {
+      try {
+        return await p;
+      } catch (err) {
+        const dump = await a.page
+          .evaluate(() => ({
+            path: location.pathname,
+            composer: !!document.querySelector('.composer textarea'),
+            bubbles: document.querySelectorAll('.bubble').length,
+            expands: document.querySelectorAll('.expand').length,
+            modals: document.querySelectorAll('.modal').length,
+            boxes: document.querySelectorAll('.scroll-box').length,
+            notice: (document.querySelector('.notice')?.textContent || '').slice(0, 40)
+          }))
+          .catch(() => 'page gone');
+        throw new Error(`${label}: ${String(err?.message ?? err).split('\n')[0].slice(0, 60)}; page=${JSON.stringify(dump)}`);
+      }
+    };
+    await want('the room never rendered a composer', a.page.waitForSelector('.composer textarea', { timeout: 30000 }));
+    // The list has to actually be scrollable, or "the dialog did not move" is vacuously true:
+    // two messages fit in the viewport and the scroll below would move nothing.
+    for (let i = 1; i <= 24; i++) {
+      await a.page.locator('.composer textarea').fill(`铺垫第 ${i} 条，让列表比视口高`);
+      await a.page.keyboard.press('Enter');
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    await a.page.waitForFunction(() => {
+      const l = document.querySelector('.list');
+      return !!l && l.scrollHeight > l.clientHeight + 400;
+    }, null, { timeout: 30000 });
+    const long = Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 行 弹窗不跟着滚`).join('\n');
+    await a.page.locator('.composer textarea').fill(long);
+    await a.page.keyboard.press('Enter');
+    await want('a 60-line message never offered 展开全文', a.page.waitForSelector('.expand', { timeout: 30000 }));
+    await a.page.locator('.expand').first().click();
+    await want('the dialog opened without its scroll region', a.page.waitForSelector('.scroll-box', { timeout: 20000 }));
+    const read = () =>
+      a.page.evaluate(() => {
+        const modals = [...document.querySelectorAll('.modal')];
+        const m = modals.find((n) => n.querySelector('.scroll-box')) ?? modals[0];
+        if (!m) return { gone: true };
+        const scrim = m.closest('.scrim');
+        const r = m.getBoundingClientRect();
+        const l = document.querySelector('.list');
+        return {
+          gone: false,
+          top: Math.round(r.top),
+          left: Math.round(r.left),
+          scrimOnBody: !!scrim && scrim.parentElement === document.body,
+          insideList: !!l && l.contains(m),
+          listScroll: Math.round(l?.scrollTop ?? -1),
+          roomy: !!l && l.scrollHeight - l.clientHeight > 400
+        };
+      });
+    const before = await read();
+    // Only the list is moved here. Sending a message of my own would jump it back to the bottom
+    // (that is a different leg's judgement) and the reading would say nothing about the dialog.
+    await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      l.scrollTop = Math.max(0, l.scrollTop - 400);
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    const after = await read();
+    const moved = Math.abs(after.listScroll - before.listScroll);
+    const ok =
+      before.roomy === true &&
+      before.scrimOnBody === true &&
+      before.insideList === false &&
+      after.gone === false &&
+      moved >= 300 &&
+      Math.abs(after.top - before.top) <= 1 &&
+      Math.abs(after.left - before.left) <= 1;
+    record(
+      'an open dialog does not travel with the list behind it',
+      ok ? 'PASS' : 'FAIL',
+      `scrim on body=${before.scrimOnBody}, dialog inside the list=${before.insideList}; list was scrollable=${before.roomy} and moved ${moved}px while the dialog moved ${after.gone ? 'n/a (gone)' : `${Math.abs(after.top - before.top)}px vertically / ${Math.abs(after.left - before.left)}px across`}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the dialog holds its place while the list scrolls under it`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+async function onePickerSplitsPicturesFromFiles(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const png = await solidPng(a.page, '#36c');
+    // One control, two kinds in the same batch: the picture has to render as a picture and the
+    // document as a card, which is what the clipboard path already did.
+    await a.page.locator('.composer input[type=file]').first().setInputFiles([
+      { name: '截图.png', mimeType: 'image/png', buffer: png },
+      { name: '说明.txt', mimeType: 'text/plain', buffer: Buffer.from('非图片附件正文\n'.repeat(8)) }
+    ]);
+    await a.page.waitForFunction(() => document.querySelectorAll('.msg.own img.thumb').length === 1 && document.querySelectorAll('.msg.own .file').length === 1, null, { timeout: 45000 });
+    await a.page.locator('.composer textarea').fill('一条普通消息用来取气泡圆角');
+    await a.page.keyboard.press('Enter');
+    await a.page.waitForSelector('.bubble', { timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 600));
+    const g = await a.page.evaluate(() => {
+      const thumb = document.querySelector('.msg.own img.thumb');
+      const card = document.querySelector('.msg.own .file');
+      const bubble = document.querySelector('.bubble');
+      const b = thumb.getBoundingClientRect();
+      const cs = getComputedStyle(thumb);
+      return {
+        buttons: document.querySelectorAll('.composer .icon-btn').length,
+        thumbs: document.querySelectorAll('.msg.own img.thumb').length,
+        cards: document.querySelectorAll('.msg.own .file').length,
+        w: Math.round(b.width),
+        h: Math.round(b.height),
+        radius: cs.borderTopLeftRadius,
+        bubbleRadius: getComputedStyle(bubble).borderTopLeftRadius,
+        queue: document.querySelectorAll('.queue .pill').length
+      };
+    });
+    const ok =
+      g.buttons === 1 &&
+      g.thumbs === 1 &&
+      g.cards === 1 &&
+      g.w <= 170 &&
+      g.h <= 114 &&
+      g.radius === g.bubbleRadius &&
+      g.queue === 0;
+    record(
+      'one picker renders pictures as pictures and files as cards',
+      ok ? 'PASS' : 'FAIL',
+      `attachment buttons in the composer=${g.buttons}; thumbnails=${g.thumbs} file cards=${g.cards}; thumbnail ${g.w}x${g.h} radius ${g.radius} vs bubble ${g.bubbleRadius}; queue left ${g.queue}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} one file control, and the file's own type decides how it renders`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+async function sendingLandsAtTheBottom(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    for (let i = 1; i <= 12; i++) {
+      await a.page.locator('.composer textarea').fill(`跳底判据第 ${i} 条`);
+      await a.page.keyboard.press('Enter');
+      await new Promise((r) => setTimeout(r, 90));
+    }
+    await a.page.waitForFunction(() => document.querySelectorAll('.bubble').length >= 12, null, { timeout: 30000 });
+    await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      l.scrollTop = Math.max(0, l.scrollTop - 500);
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    const away = await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      return { gap: Math.round(l.scrollHeight - l.scrollTop - l.clientHeight) };
+    });
+    await a.page.locator('.composer textarea').fill('发出去就要回到底部');
+    await a.page.keyboard.press('Enter');
+    await a.page.waitForSelector('.bubble:has-text("发出去就要回到底部")', { timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 500));
+    const landed = await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      const rows = document.querySelectorAll('.row');
+      const last = rows[rows.length - 1];
+      return {
+        gap: Math.round(l.scrollHeight - l.scrollTop - l.clientHeight),
+        lastVisible: last ? last.getBoundingClientRect().bottom <= window.innerHeight + 2 : false
+      };
+    });
+    const ok = away.gap >= 100 && landed.gap <= 2 && landed.lastVisible === true;
+    record(
+      'sending a message lands at the bottom',
+      ok ? 'PASS' : 'FAIL',
+      `scrolled ${away.gap}px off the bottom, then sent: ${landed.gap}px from the bottom and the last row is on screen=${landed.lastVisible}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the list follows the message you just sent`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+async function homeReportsTheLastHeadCount(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  const bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+  const b = await bCtx.newPage();
+  try {
+    const { roomId, link } = await createRoom(a.page, origin);
+    await gotoPage(b, link);
+    await acceptNickname(b);
+    await b.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page.waitForFunction(() => document.querySelector('.online')?.textContent?.includes('2') === true, null, { timeout: 30000 });
+    await a.page.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
+    await a.page.waitForSelector('.vault-item', { timeout: 30000 });
+    const row = await a.page.evaluate(() => {
+      const el = [...document.querySelectorAll('.vault-item')].find((n) => n.textContent.includes('恢复进入'));
+      return el ? (el.querySelector('.when')?.textContent || '').trim() : 'no live row';
+    });
+    const ok = /上次 2 人在线/.test(row);
+    record(
+      'the home page reports the head count seen while inside',
+      ok ? 'PASS' : 'FAIL',
+      `history row says "${row}" after two devices were in the room; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} history carries the last head count, without joining to ask`);
+  } finally {
+    await bCtx.close();
+    await a.context.close();
+  }
+}
+
+async function dialogTextIsDragSelectable(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const long = Array.from({ length: 40 }, (_, i) => `可选中的第 ${i + 1} 行文字`).join('\n');
+    await a.page.locator('.composer textarea').fill(long);
+    await a.page.keyboard.press('Enter');
+    await a.page.waitForSelector('.expand', { timeout: 30000 });
+    await a.page.locator('.expand').click();
+    await a.page.waitForSelector('.scroll-box .full-text', { timeout: 20000 });
+    const box = await a.page.evaluate(() => {
+      const t = document.querySelector('.scroll-box .full-text');
+      const r = t.getBoundingClientRect();
+      window.getSelection()?.removeAllRanges();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 12), w: Math.round(r.width), h: Math.round(r.height), full: t.textContent?.length ?? 0 };
+    });
+    // One plain click in the middle of the paragraph: with `user-select: all` this selected the
+    // entire message, so a reader who wanted one phrase got the whole thing and had to re-drag.
+    await a.page.mouse.click(box.x, box.y);
+    await new Promise((r) => setTimeout(r, 250));
+    const afterClick = await a.page.evaluate(() => (window.getSelection()?.toString() ?? '').length);
+    const start = await a.page.evaluate(() => {
+      const t = document.querySelector('.scroll-box .full-text');
+      const r = t.getBoundingClientRect();
+      return { x: Math.round(r.left + 4), y: Math.round(r.top + 10) };
+    });
+    await a.page.mouse.move(start.x, start.y);
+    await a.page.mouse.down();
+    await a.page.mouse.move(start.x + Math.min(160, box.w - 8), start.y + 10, { steps: 6 });
+    await a.page.mouse.up();
+    await new Promise((r) => setTimeout(r, 250));
+    const dragged = await a.page.evaluate(() => (window.getSelection()?.toString() ?? '').length);
+    const ok = afterClick === 0 && dragged > 0 && dragged < box.full;
+    record(
+      'the dialog text is drag-selected, not select-all on click',
+      ok ? 'PASS' : 'FAIL',
+      `one click selected ${afterClick} char(s) of ${box.full}; dragging selected ${dragged} (< full=${dragged < box.full}); text box ${box.w}x${box.h}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the full text can be copied a phrase at a time`);
+  } finally {
+    await a.context.close();
+  }
+}
+
 async function destroyLeavesTheRoom(browser, origin, emit) {
   const a = await openHome(browser, origin);
   const bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -2013,6 +2339,12 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['a file card keeps its name, size and button in place', () => fileCardKeepsItsTextColumn(browser, httpOrigin, emit)],
           ['button and avatar labels sit on their own center line', () => controlLabelsSitOnTheCenterLine(browser, httpOrigin, emit)],
           ['the full-text dialog scrolls and keeps its buttons on screen', () => longMessageModalScrollsInPlace(browser, httpOrigin, emit)],
+          ['the image preview is the top layer over the chat', () => imagePreviewIsTheTopLayer(browser, httpOrigin, emit)],
+          ['an open dialog does not travel with the list behind it', () => dialogStaysPutWhileTheListMoves(browser, httpOrigin, emit)],
+          ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
+          ['sending a message lands at the bottom', () => sendingLandsAtTheBottom(browser, httpOrigin, emit)],
+          ['the dialog text is drag-selected, not select-all on click', () => dialogTextIsDragSelectable(browser, httpOrigin, emit)],
+          ['the home page reports the head count seen while inside', () => homeReportsTheLastHeadCount(browser, httpOrigin, emit)],
           ['destroying leaves the room and returns home', () => destroyLeavesTheRoom(browser, httpOrigin, emit)]
         ];
         if (httpsSrv) checks.push(['https lock tooltip', () => tooltipMode(browser, httpsOrigin, true, 'https lock tooltip', emit)]);
