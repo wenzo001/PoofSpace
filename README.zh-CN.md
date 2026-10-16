@@ -116,7 +116,7 @@ npm run admin:data:purge-all -- --yes             # 清空全部房间/密文/�
 看那一条判据是否变红；跳过（SKIP）永远不算通过，严格台面会因 SKIP 失败。
 
 当前状态：**16 道门 PASS / 0 FAIL / 0 SKIP**（`npm run gates`），157 条自动化判据，
-外加真实浏览器线 27 条腿：在 chromium 里同时跑 `http://<局域网 IP>:<端口>`（真的非安全上下文，
+外加真实浏览器线 28 条腿：在 chromium 里同时跑 `http://<局域网 IP>:<端口>`（真的非安全上下文，
 `crypto.subtle` 缺席，走打包进产物的纯 JS AES-GCM）与真 TLS。100 人那条压力线在开发机上"整台面"里约一半的遍数
 会在打印任何一条判据之前就死掉（`0 files, 0 tests` + `ERR_IPC_CHANNEL_CLOSED`）—— 崩掉的线**从不被算成通过**，
 调查记录在 `docs/DEBT.md` D26。几处重点：

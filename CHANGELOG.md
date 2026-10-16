@@ -60,6 +60,11 @@ Everything here came out of using the app in a browser, not out of the specifica
 - The dialog's text is selected by dragging, not by a single click: `user-select: all` became `text`.
   Witness on the broken build: `one click selected 510 char(s) of 510`; fixed: `0 char(s)` on click,
   11 on drag.
+- An image message was the only kind mounted inside a mat: the bubble drew a 1px stroke and the
+  thumbnail drew a second one 10px/5px inside it, each carrying its own 16px radius (measured: bubble
+  190×124 around a 168×112 picture). The picture is the bubble now — one frame owner, the bubble
+  clips to its own radius, and the loading placeholder gives up its stroke too so the row does not
+  re-measure at the moment the pixels arrive.
 
 - `npm run dev` was inert: the custom server destroyed every WebSocket upgrade that was not `/ws`,
   which killed Next's dev hot-reload socket, so the page rendered but React never hydrated and every
@@ -140,6 +145,14 @@ Everything here came out of using the app in a browser, not out of the specifica
   the bubble's radius, sending landing at the bottom, and the home page reporting the head count seen
   while inside. Each was cut separately and each came back red with its own reading — including the
   dialog leg, which on the broken build reported `the dialog moved 400px` alongside the list's 400px.
+- A seventh leg came from looking at the rendered pixels instead of at the DOM. It measures at 1280px
+  *and* at 390px, because `@media (max-width: 390px)` restates `.bubble` padding further down the
+  stylesheet and a same-specificity rule there would silently win on a phone. Red on the unfixed
+  build: `bubble−thumbnail = 22x12px, padding 5px/10px/5px/10px, strokes 2` at both widths; green
+  after: `2x2px, padding 0px, strokes 1, clipped true`. Moving the frame also made the previous
+  round's corner term read the wrong node — it went red on the fixed build (`thumbnail ... radius
+  0px vs bubble 16px`) before it was re-pointed, and that red is what proved the term had been
+  encoding a relationship between two owners rather than a fact about one.
 - One instrument bug found and fixed while doing that: the nickname leg counted the peer's naming gate
   the moment the page arrived, and the gate appears one commit after hydration. Waiting for it instead
   of sleeping turned `peer gate=0` into a stable green — the reading that looked like a product defect
@@ -155,11 +168,12 @@ Everything here came out of using the app in a browser, not out of the specifica
 - `npm test` runs the suite in two invocations so the 100-member lane gets its own process, and the
   test bed retries a WebSocket *connect* that the operating system refused — never a `ROOM_FULL` or
   any product refusal (proved by re-refusing every join and watching the lane go red).
-- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 27 browser
-  legs. Mutation evidence per judgement — twelve knives across the release (seven in the fourth round,
-  five here), each proven red at the layer the harness actually boots — plus three earlier knives that
-  came back as equivalent mutations and are recorded as gaps rather than as passes, in
-  `docs/TEST-REPORT.md` §7.7, §7.9 and §7.11 and `docs/DEBT.md` D21–D31.
+- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 28 browser
+  legs. Mutation evidence per judgement — thirteen knives across the release (seven in the fourth
+  round, five in the fifth, one here), each proven red at the layer the harness actually boots, and
+  one judgement whose red came from the unfixed build itself rather than from a cut — plus three
+  earlier knives that came back as equivalent mutations and are recorded as gaps rather than as
+  passes, in `docs/TEST-REPORT.md` §7.7, §7.9, §7.11 and §7.12 and `docs/DEBT.md` D21–D31.
 
 ## 1.0.0 — 2026-10-15
 
