@@ -204,6 +204,19 @@ describe.runIf(openssl)('HTTPS listener (IP + certificate carrying that IP)', ()
     }
   });
 
+  // 'unsafe-eval' is React's development-time stack machinery, nothing more. The exemption has to
+  // be reachable exactly one way (NODE_ENV=development, set by scripts/dev.mjs) and must never be
+  // the string a deployment ships - an unset NODE_ENV counts as shipped.
+  it('confines the dev eval exemption to the development policy', () => {
+    const dev = loadConfig({ NODE_ENV: 'development' } as NodeJS.ProcessEnv).csp;
+    const prod = loadConfig({ NODE_ENV: 'production' } as NodeJS.ProcessEnv).csp;
+    const unset = loadConfig({} as NodeJS.ProcessEnv).csp;
+    expect(dev).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval'");
+    expect(prod).not.toContain('unsafe-eval');
+    expect(unset).not.toContain('unsafe-eval');
+    expect(prod).toContain("script-src 'self' 'unsafe-inline'");
+  });
+
   it('names no third-party origin any script could be fetched from', () => {
     const allowed = new Set(["'self'", "'unsafe-inline'", "'none'", 'ws:', 'wss:', 'blob:', 'data:']);
     for (const secure of [true, false]) {

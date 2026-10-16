@@ -126,7 +126,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         // App Router streams its flight payload in inline <script>self.__next_f.push(...)</script>
         // blocks. Without 'unsafe-inline' the browser refuses them and the page never hydrates,
         // so the room is dead. No third-party origin is ever allowed, and the rest stays strict.
-        "script-src 'self' 'unsafe-inline'",
+        // React's development build calls eval() to rebuild component stacks, so the dev server
+        // refuses to hydrate its own debugging features under this policy. `scripts/dev.mjs` sets
+        // NODE_ENV explicitly; anything else - including a production deploy - keeps the stricter
+        // string, and tests/security/tls.test.ts goes red the moment 'unsafe-eval' leaks into it.
+        env.NODE_ENV === 'development'
+          ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+          : "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' blob: data:",
         "media-src 'self' blob:",
