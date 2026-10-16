@@ -32,6 +32,8 @@ export interface RoomSnapshot {
   loadingOlder: boolean;
   uploads: Record<string, { sent: number; total: number }>;
   metas: Record<string, AttachmentMeta>;
+  /** Attachment ids whose encrypted metadata could not be fetched; a loader here would be a lie. */
+  metaGaps: string[];
   /** Set when app-layer encryption could not be verified or AEAD authentication failed. */
   blocked: string | null;
   fatal: string | null;
@@ -50,6 +52,7 @@ export class RoomStore {
   private uploads: Record<string, { sent: number; total: number }> = {};
   private metas: Record<string, AttachmentMeta> = {};
   private metaRequests = new Map<string, Promise<AttachmentMeta | null>>();
+  private metaGaps = new Set<string>();
   private snapshot: RoomSnapshot;
   private dirty = true;
   private scheduled = false;
@@ -71,6 +74,7 @@ export class RoomStore {
     this.listeners.clear();
     this.raw.clear();
     this.metaRequests.clear();
+    this.metaGaps.clear();
   }
 
   subscribe(cb: () => void): () => void {
@@ -90,6 +94,7 @@ export class RoomStore {
   metaFor(attachmentId: string): AttachmentMeta | undefined {
     const cached = this.metas[attachmentId];
     if (cached) return cached;
+    if (this.metaGaps.has(attachmentId)) return undefined;
     void this.loadMeta(attachmentId);
     return undefined;
   }
@@ -104,7 +109,14 @@ export class RoomStore {
         this.markDirty();
         return m;
       })
-      .catch(() => null)
+      .catch((err: unknown) => {
+        // Only a refused or vanished attachment is a permanent gap. A dropped request (offline,
+        // restart) must stay retryable, or a moment of bad wifi would print "unavailable" forever.
+        const text = String(err instanceof Error ? err.message : err);
+        if (/40[0-9]|50[0-9]/.test(text)) this.metaGaps.add(attachmentId);
+        this.markDirty();
+        return null;
+      })
       .finally(() => this.metaRequests.delete(attachmentId));
     this.metaRequests.set(attachmentId, p);
     return p;
@@ -256,6 +268,7 @@ export class RoomStore {
       loadingOlder: this.loadingOlder,
       uploads: this.uploads,
       metas: this.metas,
+      metaGaps: [...this.metaGaps],
       blocked: this.blocked,
       fatal: this.fatal,
       notice: this.notice,

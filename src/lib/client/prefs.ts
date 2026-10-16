@@ -68,18 +68,21 @@ function normalizeOr(raw: string, fallback: string): string {
   }
 }
 
-/** Device nickname: generated once, reused, and only ever stored as a display name. */
+/**
+ * Device nickname: nothing is written until the reader confirms one. Silently minting and caching a
+ * name on first read meant every room had a participant the reader never chose, and the name could
+ * not be told apart from a typed one later.
+ */
 export function loadPrefs(): Prefs {
   if (memory) return memory;
   const stored = read();
-  if (stored) {
-    memory = stored;
-    return stored;
-  }
-  const fresh: Prefs = { ...DEFAULTS, nick: nicknameOr('访客') };
-  write(fresh);
-  memory = fresh;
-  return fresh;
+  memory = stored ?? { ...DEFAULTS };
+  return memory;
+}
+
+/** A suggestion to confirm. Called from click/first-paint-after-mount paths only, never during render. */
+export function suggestNickname(): string {
+  return nicknameOr('访客');
 }
 
 export function currentNick(): string {

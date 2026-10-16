@@ -20,7 +20,7 @@ import { LIMITS } from '@/lib/constants';
 import { DecryptError, type AttachmentMeta } from '@/lib/crypto/envelope';
 import { copyText, dropFull, formatBytes, formatTime, fullUrl, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
 import { currentPermission, notifyEncrypted, requestPermission } from '@/lib/client/notify';
-import { setNotifyOptIn } from '@/lib/client/prefs';
+import { loadPrefs, setNotifyOptIn } from '@/lib/client/prefs';
 import { useNick } from '@/lib/client/identity';
 import * as vault from '@/lib/client/vault';
 import { canonicalRoomId, clientOptions, credentialsFromClient, secretFromFragment } from '@/lib/client/runtime';
@@ -40,6 +40,7 @@ const EMPTY_SNAPSHOT: RoomSnapshot = {
   loadingOlder: false,
   uploads: {},
   metas: {},
+  metaGaps: [],
   blocked: null,
   fatal: null,
   notice: null,
@@ -117,6 +118,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const imageInput = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const acceptedRef = useRef(false);
   const busyLoad = useRef(false);
   const activeUpload = useRef(false);
   const currentUploadKey = useRef<string | null>(null);
@@ -140,6 +142,9 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
 
   // ------------------------------------------------------------------ session
   useEffect(() => {
+    // Entering a room means being named in it, so the first-run confirmation has to happen before
+    // any credential is stored or any join is attempted.
+    if (!nickState.confirmed) return;
     let disposed = false;
     const roomId = canonicalRoomId(roomIdProp);
     if (!roomId) {
@@ -159,7 +164,10 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
 
     let client: RoomClient;
     try {
-      client = RoomClient.fromSecret(clientOptions(), { roomId, secret }, nickState.nick || NICK_FALLBACK);
+      // useNick delivers the cached name one commit after mount, so this effect would otherwise
+      // join with the empty string and put the device into the room as the fallback word.
+      // Reading prefs here is safe: it happens after hydration, never during render.
+      client = RoomClient.fromSecret(clientOptions(), { roomId, secret }, nickState.nick || loadPrefs().nick || NICK_FALLBACK);
     } catch (err) {
       const e = err as { code?: string; message?: string };
       setFatal({
@@ -178,7 +186,13 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     const off = client.on((e) => {
       if (disposed) return;
       if (e.type === 'message' && !e.msg.own) notifyEncrypted();
-      if (e.type === 'destroyed') vault.remove(roomId);
+      if (e.type === 'destroyed') {
+        vault.remove(roomId);
+        // Nothing left to render: leave the dead room and go home, with the credential already
+        // dropped so the history list cannot offer to re-enter it.
+        client.close();
+        window.location.assign('/');
+      }
     });
     setSess({ client, store });
 
@@ -201,7 +215,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
       client.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomIdProp]);
+  }, [roomIdProp, nickState.confirmed]);
 
   // Best-effort departure: the server also has a heartbeat timeout as a backstop.
   useEffect(() => {
@@ -335,6 +349,17 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     }
   }, [sess, snap.hasMore, virt]);
 
+  // A peer's message frame carries only the attachment id; the encrypted metadata has to be pulled
+  // by id. The store had this path (`metaFor`) and nothing ever called it, so an image stayed a
+  // "loading" box for everyone but the uploader.
+  useEffect(() => {
+    if (!sess) return;
+    for (const m of snap.messages) {
+      if (m.kind === 'text' || !m.attachmentId || snap.metas[m.attachmentId]) continue;
+      sess.store.metaFor(m.attachmentId);
+    }
+  }, [sess, snap.messages, snap.metas]);
+
   const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (e.currentTarget.scrollTop < 160) void loadOlder();
   };
@@ -358,7 +383,11 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
       await client.destroy();
     } catch {
       sess?.store.setNotice('销毁请求失败，请重试。');
+      return;
     }
+    // A destroyed room has nothing left to show, not even a "destroyed" banner worth staying on.
+    client.close();
+    window.location.assign('/');
   };
 
   const leaveRoom = () => {
@@ -451,6 +480,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
                     msg={m}
                     client={client}
                     meta={m.attachmentId ? snap.metas[m.attachmentId] : undefined}
+                    metaGap={!!m.attachmentId && snap.metaGaps.includes(m.attachmentId)}
                     attachmentId={m.attachmentId}
                     uploads={snap.uploads}
                     onCopy={doCopy}
@@ -593,6 +623,24 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
         />
       ) : null}
 
+      {/* Opening a link is accepting a name in the room; with no confirmed name there is nothing to join with. */}
+      {!nickState.confirmed && !showNick ? (
+        <NicknameDialog
+          first
+          nick=""
+          onClose={() => {
+            // The dialog closes itself after a successful confirm. Navigating away at that moment
+            // throws the reader out of the room they just named, so only a real refusal leaves.
+            if (acceptedRef.current) return;
+            window.location.assign('/');
+          }}
+          onApply={(next) => {
+            acceptedRef.current = true;
+            nickState.apply(next);
+          }}
+        />
+      ) : null}
+
       {showDestroy ? (
         <DestroyDialog onClose={() => setShowDestroy(false)} onConfirm={() => void destroyRoom()} />
       ) : null}
@@ -666,6 +714,7 @@ function MessageRow({
   msg,
   client,
   meta,
+  metaGap,
   attachmentId,
   uploads,
   onCopy,
@@ -675,6 +724,7 @@ function MessageRow({
   msg: UiMsg;
   client: RoomClient | null;
   meta: AttachmentMeta | undefined;
+  metaGap: boolean;
   attachmentId: string | undefined;
   uploads: RoomSnapshot['uploads'];
   onCopy: (key: string, text: string) => void;
@@ -684,16 +734,31 @@ function MessageRow({
   const [full, setFull] = useState(false);
   const long = isLongText(msg.text);
   const body = long && !full ? excerpt(msg.text) : msg.text;
+  const bodyRef = useRef<HTMLParagraphElement | null>(null);
+
+  // A selection inside this bubble is what the reader marked, so it wins; with no selection
+  // (or one that reaches outside this row) the button copies the whole message.
+  const copyTarget = (): string => {
+    const sel = typeof window === 'undefined' ? null : window.getSelection();
+    const chosen = sel?.toString() ?? '';
+    const node = bodyRef.current;
+    if (!chosen || !node || !sel) return msg.text;
+    const start = sel.anchorNode;
+    const end = sel.focusNode;
+    const inside =
+      (!!start && node.contains(start)) && (!!end && node.contains(end));
+    return inside ? chosen : msg.text;
+  };
 
   return (
     <div className={msg.own ? 'msg own' : 'msg'}>
-      <Avatar nick={msg.senderNick || NICK_FALLBACK} small />
+      {msg.own ? null : <Avatar nick={msg.senderNick || NICK_FALLBACK} small />}
       <div className="col">
-        <span className="author truncate">{msg.own ? '我' : msg.senderNick}</span>
+        {msg.own ? null : <span className="author truncate">{msg.senderNick || NICK_FALLBACK}</span>}
         <div className="bubble">
           {msg.kind === 'text' ? (
             <>
-              <p className="text-block">{body}</p>
+              <p className="text-block" ref={bodyRef}>{body}</p>
               {long ? (
                 <button type="button" className="expand" onClick={() => setFull(true)}>
                   {full ? '收起' : '展开全文'}
@@ -701,14 +766,17 @@ function MessageRow({
               ) : null}
             </>
           ) : null}
-          {msg.kind === 'image' && client && attachmentId ? (
+          {msg.kind === 'image' && client && attachmentId && !metaGap ? (
             <ImageBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
           ) : null}
-          {msg.kind === 'file' && client && attachmentId ? (
+          {msg.kind === 'file' && client && attachmentId && !metaGap ? (
             <FileBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
           ) : null}
-          {msg.kind !== 'text' && !meta ? (
-            <span className="thumb-placeholder">{uploads[msg.attachmentId ?? ''] ? '加密上传中' : '准备加载…'}</span>
+          {msg.kind !== 'text' && metaGap ? (
+            <span className="thumb-placeholder">附件元数据已不可取（房间清理或请求被拒）</span>
+          ) : null}
+          {msg.kind !== 'text' && !attachmentId ? (
+            <span className="thumb-placeholder">这条消息没有可取的附件</span>
           ) : null}
         </div>
         <div className="tail">
@@ -721,7 +789,7 @@ function MessageRow({
             </button>
           ) : null}
           {msg.kind === 'text' ? (
-            <button type="button" className="retry" onClick={() => onCopy(msg.id, msg.text)}>
+            <button type="button" className="retry copy-msg" onClick={() => onCopy(msg.id, copyTarget())}>
               复制
             </button>
           ) : null}

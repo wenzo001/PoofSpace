@@ -791,11 +791,17 @@ a {
 
 .msg {
   display: flex;
-  gap: var(--s-3);
+  gap: var(--s-2);
   align-items: flex-start;
   width: 100%;
-  padding: var(--s-2) 0;
+  padding: var(--s-1) 0;
   min-width: 0;
+}
+
+/* Only peers carry an avatar, so it can sit closer to the text it labels. */
+.msg .av {
+  width: 28px;
+  height: 28px;
 }
 
 .msg .col {
@@ -818,12 +824,12 @@ a {
 
 .bubble {
   border-radius: var(--r-bubble);
-  padding: var(--s-2) var(--s-3);
+  padding: var(--s-1) var(--s-3);
   background: var(--bubble-other);
   color: var(--body);
   border: 1px solid var(--line);
   font-size: var(--fs-base);
-  line-height: 1.55;
+  line-height: 1.45;
   max-width: 100%;
   min-width: 0;
   user-select: text;
@@ -914,6 +920,39 @@ a {
   min-height: 28px;
   padding: 0 var(--s-3);
   font-size: var(--fs-sm);
+}
+
+/* Per-message copy. Opacity, not display: the tail row must not reflow when it appears.
+   Focusable while invisible, then revealed by hover or by the keyboard reaching it. */
+.tail .copy-msg {
+  position: relative;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.msg:hover .copy-msg,
+.msg:focus-within .copy-msg,
+.copy-msg:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Touch has no hover state to discover, so there the control stays visible. */
+@media (hover: none) {
+  .tail .copy-msg {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* 28px visible pill + 8px on each side is a 44px band, and the band belongs to the button
+   itself, so a tap inside it is a click on this control. */
+@media (pointer: coarse) {
+  .tail .copy-msg::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
 }
 
 .sys {

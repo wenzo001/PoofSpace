@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Avatar from '@/components/Avatar';
 import Modal from '@/components/Modal';
 import NicknameDialog from '@/components/NicknameDialog';
@@ -75,13 +75,13 @@ export default function HomeView() {
     void load();
   }, [load]);
 
-  const create = async () => {
+  const create = async (nick?: string) => {
     setBusy(true);
     setError(null);
     try {
       const opts = clientOptions();
       if (!opts) throw new Error('当前环境不支持端到端加密');
-      const client = await RoomClient.createRoom(opts, nickState.nick);
+      const client = await RoomClient.createRoom(opts, nick || nickState.nick);
       const parts = credentialsFromClient(client);
       if (!parts) throw new Error('房间凭据生成失败');
       vault.put({ roomId: parts.roomId, secret: parts.secret, creatorToken: client.creatorToken });
@@ -102,6 +102,26 @@ export default function HomeView() {
     window.location.assign(`/room/${parts.roomId}`);
   };
 
+  // The first create/join has to settle the device's name; afterwards only an explicit edit changes it.
+  const pending = useRef<{ kind: 'create' } | { kind: 'join'; code: string } | null>(null);
+
+  const guard = (intent: { kind: 'create' } | { kind: 'join'; code: string }): boolean => {
+    if (nickState.confirmed) return true;
+    pending.current = intent;
+    setShowJoin(false);
+    setShowNick(true);
+    return false;
+  };
+
+  const confirmNick = (raw: string) => {
+    const name = nickState.apply(raw);
+    const intent = pending.current;
+    pending.current = null;
+    if (!intent) return;
+    if (intent.kind === 'create') void create(name);
+    else enter(intent.code);
+  };
+
   return (
     <div className="shell">
       <header className="nav">
@@ -110,8 +130,8 @@ export default function HomeView() {
           <b>PoofSpace</b>
         </div>
         <button type="button" className="me" onClick={() => setShowNick(true)}>
-          <Avatar nick={nickState.nick} small />
-          <span className="name">{nickState.nick}</span>
+          <Avatar nick={nickState.nick || '未命名'} small />
+          <span className="name">{nickState.nick || '未命名'}</span>
         </button>
       </header>
 
@@ -120,7 +140,7 @@ export default function HomeView() {
         <h1 className="headline">创建即聊，离开即焚。</h1>
         <p className="sub">无需账号，生成房间即可分享；端到端加密，最后一人离开 5 分钟后自动销毁。</p>
         <div className="btnrow">
-          <button type="button" className="btn btn-primary" onClick={create} disabled={busy}>
+          <button type="button" className="btn btn-primary" onClick={() => { if (guard({ kind: 'create' })) void create(); }} disabled={busy}>
             {busy ? '创建中…' : '创建聊天室'}
           </button>
           <button type="button" className="btn btn-ghost" onClick={() => setShowJoin(true)}>
@@ -136,7 +156,7 @@ export default function HomeView() {
 
       {rows.length > 0 ? (
         <section className="section">
-          <h2 className="section-title">恢复进入</h2>
+          <h2 className="section-title">历史</h2>
           <div className="list-plain">
             {rows.map((row) => (
               <div className="vault-item" key={row.roomId}>
@@ -172,13 +192,23 @@ export default function HomeView() {
       {showJoin ? (
         <Modal title="加入聊天室" onClose={() => setShowJoin(false)}>
           <span className="label">粘贴邀请链接或邀请口令。</span>
-          <JoinForm error={error} onSubmit={enter} />
+          <JoinForm error={error} onSubmit={(v) => { if (guard({ kind: 'join', code: v })) enter(v); }} />
           <span className="cap">链接 # 之后的密钥只在浏览器本地使用，不会发送给服务器。</span>
         </Modal>
       ) : null}
 
       {showNick ? (
-        <NicknameDialog nick={nickState.nick} onClose={() => setShowNick(false)} onApply={nickState.apply} />
+        <NicknameDialog
+          nick={nickState.nick}
+          first={!nickState.confirmed}
+          onClose={() => {
+            // Backing out of the prompt must also drop what it was standing in front of, or the
+            // next time the reader edits their name they get a room created out of nowhere.
+            pending.current = null;
+            setShowNick(false);
+          }}
+          onApply={confirmNick}
+        />
       ) : null}
     </div>
   );
