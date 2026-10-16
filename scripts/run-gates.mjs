@@ -415,10 +415,15 @@ const GATES = [
     spec: '正文 十二 第六阶段',
     run: async () => {
       const lane = await browserLane();
-      return {
-        status: lane.status,
-        evidence: lane.results.map((r) => `${r.name}=${r.status}`).join('; ')
-      };
+      // The table prints 300 characters of evidence, and the leg list is longer than that: a FAIL
+      // in the second half was being cut off, so the row read "T5 FAIL" with every visible leg green.
+      // Lead with the legs that did not pass, detail included, then the pass count.
+      const bad = lane.results.filter((r) => r.status !== 'PASS');
+      const evidence = bad.length
+        ? `${bad.length} of ${lane.results.length} legs did not pass: ` +
+          bad.map((r) => `${r.name}=${r.status} (${String(r.detail).replace(/\s+/g, ' ').slice(0, 110)})`).join(' | ')
+        : lane.results.map((r) => `${r.name}=${r.status}`).join('; ');
+      return { status: lane.status, evidence };
     }
   },
   {

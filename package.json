@@ -1,6 +1,6 @@
 {
   "name": "poofspace",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "license": "MIT",
   "description": "PoofSpace - ephemeral, registration-free, multi-party end-to-end encrypted chat rooms",
@@ -11,7 +11,7 @@
     "start": "node dist/server/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
     "release": "node scripts/build-release.mjs",
-    "test": "vitest run --reporter=dot",
+    "test": "vitest run --reporter=dot --exclude \"tests/perf/**\" && vitest run --reporter=dot tests/perf",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:security": "vitest run tests/security",

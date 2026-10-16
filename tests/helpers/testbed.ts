@@ -80,15 +80,39 @@ export function clientOptions(tb: Testbed, extra: Partial<RoomClientOptions> = {
 
 export async function newRoom(tb: Testbed, nick = '创建者', maxMembers = 100): Promise<RoomClient> {
   const client = await RoomClient.createRoom(clientOptions(tb, { maxMembers }), nick);
-  await client.connect();
+  await connect(client);
   return client;
+}
+
+/**
+ * A loopback handshake can fail outright while a hundred sockets are being opened and closed at once:
+ * measured on this machine as `socket error` from a 20-way concurrent rejoin with the ledger reading
+ * `{"rows":80,"online":80}` - seats free, the OS refused the connect. So the connect edge gets
+ * retried here, and only this edge: ROOM_FULL, expired credentials and every capacity refusal must
+ * still fail the test on the first attempt, or this helper would swallow the very refusals the lanes
+ * exist to judge.
+ */
+const CONNECT_FLAKE = /socket error|ECONNREFUSED|ECONNRESET|EADDRINUSE|underlying socket|closed before/i;
+
+async function connect(client: RoomClient, attempts = 4): Promise<void> {
+  for (let i = 1; ; i++) {
+    try {
+      await client.connect();
+      return;
+    } catch (err) {
+      const why = String((err as Error).message || err);
+      if (i >= attempts || !CONNECT_FLAKE.test(why)) throw err;
+      client.close();
+      await new Promise((r) => setTimeout(r, 250 * i));
+    }
+  }
 }
 
 export async function joinByInvite(tb: Testbed, invite: { code: string }, nick: string): Promise<RoomClient> {
   const parsed = parseInviteInput(invite.code);
   if (!parsed) throw new Error('invite could not be parsed');
   const client = RoomClient.fromSecret(clientOptions(tb), parsed, nick);
-  await client.connect();
+  await connect(client);
   return client;
 }
 

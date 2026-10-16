@@ -15,6 +15,12 @@ export default defineConfig({
     // concurrently starves the loopback accept queue and connects fail with 'socket error'
     // while the product is unchanged. Sequential files keep the assertions identical.
     fileParallelism: false,
+    // `npm test` runs this include set in two invocations: everything except tests/perf, then
+    // tests/perf. Sequential files reuse one child process, and the 100-member lane is the one
+    // that pays for whatever the earlier files left behind in it - measured as a cascade in
+    // reconnect churn -> large transfer -> storage hygiene (docs/DEBT.md D25). The two filters
+    // are the same set by construction (`include` minus `tests/perf/**`, plus `tests/perf`), so
+    // neither half can silently drop a file.
     reporters: ['default'],
     coverage: { provider: 'v8', include: ['src/**/*.ts'] }
   },
