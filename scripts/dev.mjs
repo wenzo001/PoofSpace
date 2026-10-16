@@ -75,8 +75,58 @@ function runCompiler() {
   });
 }
 
+function readDevLock() {
+  const file = path.join(root, '.next', 'dev', 'lock');
+  if (!fs.existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return typeof parsed.pid === 'number' ? { file, pid: parsed.pid, port: parsed.port } : null;
+  } catch {
+    return { file, pid: null, port: null };
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err != null && err.code === 'EPERM';
+  }
+}
+
+/**
+ * Next refuses to start a second dev server, and the refusal is aimed at the process that holds
+ * `.next/dev/lock`. Say it before spawning anything: otherwise the child dies in under a second,
+ * the restart below respawns it, and one actionable line becomes an unreadable loop.
+ */
+function checkDevLock() {
+  const lock = readDevLock();
+  if (!lock) return true;
+  if (lock.pid && pidAlive(lock.pid)) {
+    process.stderr.write(
+      `dev: Next already has a dev server for this directory (PID ${lock.pid}${lock.port ? `, port ${lock.port}` : ''}).\n` +
+        `     Stop that one (taskkill /PID ${lock.pid} /F) or use another port with --port N.\n`
+    );
+    return false;
+  }
+  info(`clearing a stale Next dev lock (PID ${lock.pid ?? 'unknown'} is gone)`);
+  try {
+    fs.rmSync(lock.file, { force: true });
+  } catch {
+    /* Next will overwrite it */
+  }
+  return true;
+}
+
+// A child that dies within a second of starting is not a crash worth recovering from - it is the
+// same refusal waiting on the other side of the restart. Two of those in a row and the loop stops.
+const FAST_EXIT_MS = 8_000;
+let fastExits = 0;
+
 function startServer() {
   if (stopping) return;
+  const startedAt = Date.now();
   const proc = spawn(process.execPath, ['--enable-source-maps', serverEntry], {
     cwd: root,
     stdio: 'inherit',
@@ -87,7 +137,17 @@ function startServer() {
     if (child !== proc) return; // a restart already replaced it
     child = null;
     if (stopping) return;
-    info(`server exited (code=${code} signal=${signal}); restarting in 1s (Ctrl+C to stop)`);
+    const ranFor = Date.now() - startedAt;
+    if (code !== 0 && ranFor < FAST_EXIT_MS && ++fastExits >= 2) {
+      process.stderr.write(
+        `dev: the server stopped ${fastExits} times within ${Math.round(FAST_EXIT_MS / 1000)}s of starting (last code=${code}).\n` +
+          `     It is refusing to boot, not crashing - most often that is Next's "another dev server is already running".\n` +
+          `     Check .next/dev/lock, or start on another port: node scripts/dev.mjs --port N\n`
+      );
+      process.exit(1);
+    }
+    if (ranFor >= FAST_EXIT_MS) fastExits = 0;
+    info(`server exited (code=${code} signal=${signal}) after ${Math.round(ranFor / 1000)}s; restarting in 1s (Ctrl+C to stop)`);
     setTimeout(startServer, 1000);
   });
   info(`http://${opts.host}:${opts.port}  (pages, /api and /ws share this origin)`);
@@ -153,6 +213,7 @@ if (!fs.existsSync(serverEntry)) {
   process.stderr.write(`dev: expected ${path.relative(root, serverEntry)} after compiling; not found\n`);
   process.exit(1);
 }
+if (!checkDevLock()) process.exit(1);
 startServer();
 
 if (opts.watch) {
