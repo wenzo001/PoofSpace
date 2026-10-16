@@ -472,10 +472,12 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 
 ### 7.8 v1.0.1 的包与状态
 
-- 包：`npm run release`（含一次全量构建）→ `REL_EXIT=0`，`release/build-info.json` 记
-  `builtAt=2026-10-16T00:28:25.894Z`、`nextBuildId=1XSVPobAxDkyjpEtM5qpv`，暂存树与解开的 tar 包**两边都启动验证过**。
-  之后台面 B1 那条腿还会自己重跑一次 `npm run build`，所以"被 16/0/0 认证的那次编译"与"交付包里的字节"
-  仍然要按 §7.6 末尾的口径分开说。
+- 包：最后一次 `npm run release`（`--no-build`，直接复用台面 B1 那条腿刚构建出来的产物）→ `REL_EXIT=0`，
+  `release/build-info.json` 记 `builtAt=2026-10-16T01:02:58.355Z`、`nextBuildId=t8QanNQCCGs-9S4dhY9Fn`，
+  暂存树与解开的 tar 包**两边都启动验证过**（各自跑完 10 步冒烟）。
+  这一版**不需要**§7.6 那条"认证的那次编译 vs 交付的那次编译"的分开说：16/0/0 那一遍台面的 B1 腿自己重建了
+  `.next/` 与 `dist/`，随后的 `--no-build` 打包复用的正是它，所以被认证的那次编译就是交付包里的字节。
+  （代价：交付包里的 `docs/` 比仓库最后一条提交早一个提交——那一提交只改文档文字，代码树相同。）
 - 判定：`scratch/certify-v101c.log` = **16 PASS / 0 FAIL / 0 SKIP**（同一棵代码树今天另有一遍 16/0/0，
   中间七遍至少红一条，见 §0 的分布与 D26/D27）。
 - 版本：`package.json` 升到 `1.0.1`，注解标签 `v1.0.1` 打在本轮最后一条提交上；
