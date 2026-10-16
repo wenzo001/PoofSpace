@@ -125,6 +125,25 @@ function pm2Bin() {
   return probe.stdout.split(/\r?\n/)[0].trim();
 }
 
+/**
+ * D25's missing reading: what else was on the machine while a lane ran. The 100-member lane has died
+ * twice in-table with `Channel closed` and `0 files, 0 tests` - a worker that never reported is an
+ * environment fact, not a product verdict, so the table now records the occupancy and the child's
+ * exit code next to it instead of printing a bare FAIL. The crash still counts as FAIL: a lane that
+ * ran no test is never a pass.
+ */
+function machineOccupancy() {
+  const count = (image) => {
+    const r = spawnSync('tasklist', ['/NH', '/FI', `IMAGENAME eq ${image}`], { encoding: 'utf8' });
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    if (r.error) return `?(${String(r.error.message).slice(0, 40)})`;
+    return String((out.match(new RegExp(image.split('.').join('\\.'), 'gi')) || []).length);
+  };
+  const free = Math.round(os.freemem() / 1048576);
+  const total = Math.round(os.totalmem() / 1048576);
+  return `node=${count('node.exe')} chrome=${count('chrome.exe')} memFreeMiB=${free}/${total}`;
+}
+
 function readBuildInfo() {
   const f = path.join(releaseDir, 'build-info.json');
   if (!fs.existsSync(f)) return null;
@@ -404,9 +423,14 @@ const GATES = [
     title: 'performance lane: 100 members, broadcast, reconnect churn, upload alongside text, no growth',
     spec: '正文 十一 性能 / 十',
     run: () => {
+      const before = machineOccupancy();
       const r = vitest(LANES.T4, 25 * 60_000, ['--no-file-parallelism']);
+      const after = machineOccupancy();
       const s = summarise(r.out);
-      return { status: r.code === 0 && !s.failed && s.tests > 0 ? 'PASS' : 'FAIL', evidence: `${s.files} files, ${s.tests} tests${s.failed ? ' with failures' : ''}: ${s.tail}` };
+      return {
+        status: r.code === 0 && !s.failed && s.tests > 0 ? 'PASS' : 'FAIL',
+        evidence: `machine before[${before}] after[${after}] exit=${r.code}; ${s.files} files, ${s.tests} tests${s.failed ? ' with failures' : ''}: ${s.tail}`
+      };
     }
   },
   {

@@ -1072,15 +1072,41 @@ async function copyControlBehaviour(browser, origin, emit) {
         const el = document.querySelector('.msg.own .copy-msg');
         const r = el.getBoundingClientRect();
         const cx = r.left + r.width / 2;
-        const above = document.elementFromPoint(cx, r.top - 5);
-        const below = document.elementFromPoint(cx, r.bottom + 5);
+        const cy = r.top + r.height / 2;
+        // Probe the band by walking outward until the press stops landing on this control. A fixed
+        // probe distance would either pass for a band that is too small or fail for one that is
+        // simply shaped differently - the judgement is the total reachable size, ≥44 on each axis.
+        const wins = (x, y) => {
+          const hit = document.elementFromPoint(x, y);
+          return !!hit && (hit === el || el.contains(hit));
+        };
+        const reach = (at) => {
+          let last = 0;
+          for (let d = 1; d <= 30; d++) {
+            // Sampled half a pixel inside each ring: a box edge can land on a fraction, and a point
+            // exactly on the boundary is not a press, so an integer probe reads one pixel short.
+            if (!wins(...at(d - 0.5))) break;
+            last = d;
+          }
+          return last;
+        };
+        const up = reach((d) => [cx, r.top - d]);
+        const down = reach((d) => [cx, r.bottom + d]);
+        const left = reach((d) => [r.left - d, cy]);
+        const right = reach((d) => [r.right + d, cy]);
+        const belowEl = document.elementFromPoint(cx, r.bottom + 12);
         return {
           coarse: matchMedia('(pointer: coarse)').matches,
           hoverNone: matchMedia('(hover: none)').matches,
           opacity: getComputedStyle(el).opacity,
           visibleHeight: Math.round(r.height * 10) / 10,
-          bandAbove: above === el || el.contains(above),
-          bandBelow: below === el || el.contains(below)
+          visibleWidth: Math.round(r.width * 10) / 10,
+          vertical: Math.round((up + r.height + down) * 10) / 10,
+          horizontal: Math.round((left + r.width + right) * 10) / 10,
+          reach: { up, down, left, right },
+          // Reported, not asserted: what the reader would press just under the pill if the band
+          // did not reach there. A neighbour's control here means the band is stealing taps.
+          under: belowEl ? `${belowEl.tagName.toLowerCase()}${belowEl.className ? `.${String(belowEl.className).split(' ')[0]}` : ''}` : 'none'
         };
       });
       await mob.context.close();
@@ -1100,12 +1126,12 @@ async function copyControlBehaviour(browser, origin, emit) {
   const selectionWins = fine.partClip === fine.wanted && fine.wanted.length > 0 && fine.partClip !== TEXT;
   const wholeWhenNothingSelected = fine.wholeClip === TEXT;
   const touchStanding = touch.coarse && touch.hoverNone && touch.opacity === '1';
-  const bandReachesThisControl = touch.bandAbove && touch.bandBelow && touch.visibleHeight + 16 >= 44;
+  const bandReachesThisControl = touch.vertical >= 44 && touch.horizontal >= 44;
   const ok = hiddenUntilHover && selectionWins && wholeWhenNothingSelected && touchStanding && bandReachesThisControl;
   record(
     'copy control reveals and honors the selection',
     ok ? 'PASS' : 'FAIL',
-    `hover: opacity ${fine.before}->${fine.after}; selected "${(fine.wanted ?? '').slice(0, 12)}" copied=${JSON.stringify(fine.partClip)} whole=${fine.wholeClip === TEXT}; touch: coarse=${touch.coarse} hoverNone=${touch.hoverNone} opacity=${touch.opacity} pill=${touch.visibleHeight}px bandAbove=${touch.bandAbove} bandBelow=${touch.bandBelow}`
+    `hover: opacity ${fine.before}->${fine.after}; selected "${(fine.wanted ?? '').slice(0, 12)}" copied=${JSON.stringify(fine.partClip)} whole=${fine.wholeClip === TEXT}; touch: coarse=${touch.coarse} hoverNone=${touch.hoverNone} opacity=${touch.opacity} pill=${touch.visibleHeight}x${touch.visibleWidth}px band=${touch.vertical}x${touch.horizontal}px reach ${JSON.stringify(touch.reach)} under="${touch.under}"`
   );
   emit(`${ok ? 'PASS' : 'FAIL'} copy control hides until hover, stands on touch, copies the selection first`);
 }
@@ -1271,6 +1297,497 @@ async function joinedRoomIsOfferedAsHistory(browser, origin, emit) {
   }
 }
 
+/**
+ * The reader's complaint: a new member can see the history, but scrolling up makes the canvas
+ * bounce back down and upward scrolling feels like it fights the finger.
+ *
+ * Two mechanisms can move the page under a reader who is scrolling up, and this leg reproduces
+ * what the reader actually did - arriving at a room whose history was already there:
+ *  - rows above the viewport mount at the estimate and are measured a frame later;
+ *  - reaching the top fetches a whole page of older messages and prepends it.
+ * The leg scrolls up in steps, names the topmost visible row by its text and records where it stood
+ * in the same task as the gesture, waits for the measurements and the page to land, and requires
+ * that same row to still sit at that same distance from the top edge. Requiring an older page to
+ * have arrived is what keeps the leg from passing on a fixture that never reached the reader's path.
+ */
+async function historyScrollKeepsItsPlace(browser, origin, emit) {
+  const c = await openHome(browser, origin);
+  const jCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+  const jPage = await jCtx.newPage();
+  try {
+    const { roomId } = await createRoom(c.page, origin);
+    await c.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    // The server allows 20 messages/s with a 40-token burst, and fill+Enter is faster than that,
+    // so an unpaced seed loses the tail of the history to the rate limiter. Paced, the seed is
+    // what the reader's room actually was: 100 messages, all of them stored.
+    for (let i = 0; i < 100; i++) {
+      await sendMessage(c.page, `历史探针-${i} ` + '内容'.repeat(1 + (i % 9)));
+      await new Promise((r) => setTimeout(r, 90));
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    // A marker sent after the burst settles is the row both devices must agree on: if the joiner
+    // is not served it, the joiner is not looking at the newest history at all.
+    await sendMessage(c.page, '历史终点-向上滚要保住这一条');
+    // The list is windowed, so the number of .msg nodes says nothing about how many messages
+    // exist: wait for the newest row to render, then let the sends drain before the joiner reads
+    // the room - arriving mid-drift would race history against live delivery.
+    try {
+      await c.page.waitForSelector('.bubble:has-text("历史终点-")', { timeout: 30000 });
+    } catch (err) {
+      const stuck = await chatState(c.page);
+      record(
+        'scrolling up through history keeps the row you are looking at',
+        'FAIL',
+        `the seeder never showed its own last message: ${String(err.message).split('\n').slice(0, 2).join(' / ').slice(0, 160)}; creator page ${JSON.stringify(stuck)}`
+      );
+      emit('FAIL the history the new member reads stays under their finger: seeding broke');
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const link = await inviteLink(c.page, origin, roomId);
+    await gotoPage(jPage, link);
+    await acceptNickname(jPage);
+    await jPage.waitForSelector('.composer textarea', { timeout: 30000 });
+    try {
+      await jPage.waitForSelector('.bubble:has-text("历史终点-")', { timeout: 60000 });
+    } catch (err) {
+      const stuck = await chatState(jPage);
+      record(
+        'scrolling up through history keeps the row you are looking at',
+        'FAIL',
+        `the joiner was not served the newest history: ${String(err.message).split('\n').slice(0, 2).join(' / ').slice(0, 160)}; joiner page ${JSON.stringify(stuck)}`
+      );
+      emit('FAIL the history the new member reads stays under their finger: the joiner saw no history');
+      return;
+    }
+    await jPage.bringToFront();
+
+    const steps = await jPage.evaluate(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const el = document.querySelector('.list');
+      const rows = () => [...document.querySelectorAll('.row')];
+      const labelOf = (r) => ((r?.querySelector('.text-block')?.textContent || r?.textContent || '').trim().slice(0, 24));
+      const topRow = () => {
+        const t = el.getBoundingClientRect().top;
+        return rows().find((r) => r.getBoundingClientRect().bottom > t + 1);
+      };
+      let older = 0;
+      const mo = new MutationObserver((records) => {
+        for (const rec of records) {
+          for (const n of rec.addedNodes) {
+            if (n.nodeType === 1 && typeof n.className === 'string' && n.className.includes('loading-older')) older++;
+          }
+        }
+      });
+      mo.observe(el.parentElement, { childList: true, subtree: true });
+
+      el.scrollTop = el.scrollHeight;
+      await sleep(300);
+      const start = el.scrollTop;
+      const rowHeights = rows().map((r) => Math.round(r.getBoundingClientRect().height * 10) / 10);
+      const seed = {
+        rows: rows().length,
+        sh: Math.round(el.scrollHeight),
+        // Every mounted row sitting at the estimate would mean the list never measured anything,
+        // which is the difference between a leg that can see drift and one that cannot.
+        h0: rowHeights[0] ?? null,
+        uniq: [...new Set(rowHeights)].join('/')
+      };
+      const out = [];
+      let gestured = 0;
+      for (let s = 0; s < 14; s++) {
+        const was = el.scrollTop;
+        el.scrollTop = Math.max(0, el.scrollTop - 260);
+        gestured += Math.max(0, was - el.scrollTop);
+        // Read the row's place in the SAME task as the gesture, before React has re-windowed or
+        // re-measured anything. Waiting even 70ms first bakes the drift into the baseline, and the
+        // leg then measures whether a settled page stays still - which it always does, fixed or not.
+        const row = topRow();
+        const label = labelOf(row);
+        const y0 = row ? row.getBoundingClientRect().top : 0;
+        await sleep(420);
+        const after = rows().find((r) => labelOf(r) === label);
+        out.push({
+          s,
+          label,
+          dy: after ? Math.round((after.getBoundingClientRect().top - y0) * 10) / 10 : null,
+          lost: !after,
+          // Reported so a zero can be told apart from "nothing changed underneath": the number of
+          // mounted rows and the height the list claims are what a re-measurement moves.
+          rows: rows().length,
+          sh: Math.round(el.scrollHeight),
+          top: Math.round(el.scrollTop)
+        });
+        if (el.scrollTop === 0 && older > 0) break;
+      }
+      mo.disconnect();
+      return { out, seed, older, gestured: Math.round(gestured), moved: Math.round(start - el.scrollTop) };
+    });
+
+    const worst = steps.out.reduce((m, r) => Math.max(m, r.lost || r.dy === null ? 999 : Math.abs(r.dy)), 0);
+    // Two different judgements, because two different mechanisms, and they must not hide each
+    // other: the steady re-measurement hold, and the hold across a page of older history landing.
+    // The thresholds are the two readings this project has measured - the same leg with the hold
+    // removed read 4118px on the arrival step and 16px on the steady steps - so each one is a
+    // number between a broken and a working build, not a guess. A perfect 0px arrival hold is
+    // still owed and is registered as debt D28.
+    const isArrival = (r, i) => i > 0 && Math.abs(r.sh - steps.out[i - 1].sh) > 500;
+    const steady = steps.out.filter((r, i) => !isArrival(r, i));
+    const arrival = steps.out.filter((r, i) => isArrival(r, i));
+    const steadyWorst = steady.reduce((m, r) => Math.max(m, r.lost || r.dy === null ? 999 : Math.abs(r.dy)), 0);
+    const arrivalWorst = arrival.reduce((m, r) => Math.max(m, r.lost || r.dy === null ? 999 : Math.abs(r.dy)), 0);
+    const grew = Math.max(...steps.out.map((r) => r.sh)) - steps.seed.sh;
+    const ok =
+      steps.out.length >= 8 && steps.gestured > 800 && steps.older >= 1 &&
+      steadyWorst <= 2 && arrivalWorst <= 300;
+    record(
+      'scrolling up through history keeps the row you are looking at',
+      ok ? 'PASS' : 'FAIL',
+      `joiner found ${steps.seed.rows} mounted row(s) in a 101-message room, row height ${steps.seed.h0}px (list ${steps.seed.sh}px); reader gestured up ${steps.gestured}px in ${steps.out.length} step(s) and the page ended ${steps.moved}px further down than it started; older pages seen ${steps.older}; list grew ${grew}px; steady worst ${steadyWorst}px over ${steady.length} step(s); page-arrival worst ${arrivalWorst}px over ${arrival.length} arrival step(s); overall worst ${worst}px; steps ${JSON.stringify(steps.out.map((r) => `${r.s}:${r.lost ? 'lost' : r.dy + 'px'} rows${r.rows} sh${r.sh} top${r.top}`))}; room ${String(roomId).slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the history the new member reads stays under their finger`);
+  } finally {
+    await jCtx.close();
+    await c.context.close();
+  }
+}
+
+/**
+ * A leg that cannot find its selector has to say what the page actually holds, otherwise the
+ * reading is a timeout and the next run guesses. One dump for the chat screen.
+ */
+async function chatState(page) {
+  try {
+    return await page.evaluate(() => {
+      const text = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? (el.textContent || '').trim().slice(0, 60) : null;
+      };
+      const blocks = [...document.querySelectorAll('.msg .text-block')].map((n) => (n.textContent || '').trim().slice(0, 16));
+      return {
+        on: document.querySelector('.composer') ? 'room' : 'home',
+        head: blocks[0] ?? null,
+        tail: blocks[blocks.length - 1] ?? null,
+        msgs: document.querySelectorAll('.msg').length,
+        own: document.querySelectorAll('.msg.own').length,
+        texts: document.querySelectorAll('.msg.own .text-block').length,
+        imgs: document.querySelectorAll('.msg.own img.thumb').length,
+        cards: document.querySelectorAll('.msg.own .file').length,
+        expand: document.querySelectorAll('.expand').length,
+        queue: [...document.querySelectorAll('.queue .pill')].map((p) => (p.textContent || '').trim().slice(0, 20)).join(' | ') || 'empty',
+        notice: text('.notice-warn') || text('.notice-bar'),
+        error: text('.notice-error'),
+        draft: (document.querySelector('.composer textarea') || { value: null }).value?.replace(/\n/g, '\\n').slice(0, 48) ?? null
+      };
+    });
+  } catch (err) {
+    return { dumpFailed: String(err && err.message).slice(0, 120) };
+  }
+}
+
+/**
+ * Two claims in one leg because they arrive together: Ctrl/Cmd+V anywhere on the page must send
+ * what the clipboard holds (a screenshot, a copied image, a copied file), and several items must
+ * all go - not just the first. Driven by a real paste event carrying a DataTransfer with two files,
+ * which is what the browser hands the app.
+ */
+async function clipboardPasteSendsEveryItem(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const made = await a.page.evaluate(async () => {
+      const png = (color) => {
+        const c = document.createElement('canvas');
+        c.width = 48;
+        c.height = 48;
+        const g = c.getContext('2d');
+        g.fillStyle = color;
+        g.fillRect(0, 0, 48, 48);
+        return c.toDataURL('image/png');
+      };
+      const bytes = (dataUrl) => Uint8Array.from(atob(dataUrl.split(',')[1]), (ch) => ch.charCodeAt(0));
+      const dt = new DataTransfer();
+      // Nothing is focused: the claim is that a paste anywhere on the page sends, not that it works
+      // only while the caret is already inside the input box.
+      const active = document.activeElement;
+      if (active && typeof active.blur === 'function') active.blur();
+      dt.items.add(new File([bytes(png('#36c'))], 'screenshot.png', { type: 'image/png' }));
+      // The second one is deliberately named like a clipboard screenshot with no real name, so the
+      // leg also proves the app renames it instead of queueing two files under one identity.
+      dt.items.add(new File([bytes(png('#c36'))], 'image.png', { type: 'image/png' }));
+      dt.items.add(new File(['剪贴板里的文本文件正文'], '剪贴板里的文件.txt', { type: 'text/plain' }));
+      let ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+      if (!ev.clipboardData) {
+        ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, 'clipboardData', { value: dt });
+      }
+      window.dispatchEvent(ev);
+      return { items: dt.items.length, files: dt.files.length };
+    });
+    try {
+      await a.page.waitForFunction(
+        () =>
+          document.querySelectorAll('.msg.own img.thumb').length === 2 &&
+          document.querySelectorAll('.msg.own .file').length === 1,
+        null,
+        { timeout: 45000 }
+      );
+    } catch (err) {
+      const stuck = await chatState(a.page);
+      record(
+        'a paste sends every file the clipboard carries',
+        'FAIL',
+        `${String(err.message).split('\n')[0].slice(0, 120)}; clipboard handed ${made.items} item(s) (${made.files} files); page: ${JSON.stringify(stuck)}`
+      );
+      emit('FAIL pasting sends every item: the queue never drained');
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const seen = await a.page.evaluate(() => {
+      // Sample a pixel from each thumb: two rows that decode to the same colour would be one file
+      // rendered twice, which is not "every item on the clipboard went through".
+      const swatch = (img) => {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0);
+        const d = g.getImageData(Math.floor(img.naturalWidth / 2), Math.floor(img.naturalHeight / 2), 1, 1).data;
+        return `#${[d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+      };
+      const imgs = [...document.querySelectorAll('.msg.own img.thumb')];
+      return {
+        images: imgs.length,
+        decoded: imgs.filter((i) => i.naturalWidth > 0).length,
+        colours: imgs.map(swatch),
+        files: document.querySelectorAll('.msg.own .file').length,
+        names: [...document.querySelectorAll('.msg.own .file .name')].map((n) => n.textContent),
+        queue: [...document.querySelectorAll('.queue .pill')].map((p) => (p.textContent || '').trim().slice(0, 24))
+      };
+    });
+    const distinct = new Set(seen.colours).size === 2;
+    const ok =
+      made.items === 3 && seen.images === 2 && seen.decoded === 2 && distinct &&
+      seen.files === 1 && seen.queue.length === 0;
+    record(
+      'a paste sends every file the clipboard carries',
+      ok ? 'PASS' : 'FAIL',
+      `clipboard handed ${made.items} item(s) (${made.files} files); rendered img ${seen.images} decoded ${seen.decoded} colours ${JSON.stringify(seen.colours)} distinct=${distinct}, file cards ${seen.files} named ${JSON.stringify(seen.names)}, queue left ${JSON.stringify(seen.queue)}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} pasting sends every item the clipboard carries`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+/**
+ * The file card, judged on the geometry the reader complained about: the icon used to eat the whole
+ * row (measured 329x329) so the name collapsed to zero width and the size text stacked one
+ * character per line, with the download button pushed outside the card.
+ */
+async function fileCardKeepsItsTextColumn(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const payload = Buffer.from('判据探针：非图片附件。\n'.repeat(40));
+    // Two files in one picker action: the card geometry is the complaint, but "several files at
+    // once" is the same queue the paste leg exercises, and the picker is the other way into it.
+    await a.page.locator('.composer input[type=file]').first().setInputFiles([
+      { name: '一份比较长的文件名用来验证省略号-2026-10-16.txt', mimeType: 'text/plain', buffer: payload },
+      { name: '第二个附件也要一起发出去.txt', mimeType: 'text/plain', buffer: Buffer.from('第二个附件正文\n'.repeat(12)) }
+    ]);
+    await a.page.waitForFunction(() => document.querySelectorAll('.msg.own .file').length === 2, null, { timeout: 45000 });
+    await new Promise((r) => setTimeout(r, 1200));
+    const g = await a.page.evaluate(() => {
+      const card = document.querySelector('.msg.own .file');
+      const r = (el) => {
+        const b = el.getBoundingClientRect();
+        return { w: Math.round(b.width), h: Math.round(b.height) };
+      };
+      const icon = card.querySelector('.icon') || card.querySelector('svg');
+      const meta = card.querySelector('.meta');
+      const name = card.querySelector('.name');
+      const size = card.querySelector('.when');
+      const btn = card.querySelector('button');
+      return {
+        card: r(card),
+        icon: r(icon),
+        meta: r(meta),
+        name: r(name),
+        size: r(size),
+        sizeText: size.textContent,
+        btn: r(btn),
+        overflow: Math.round(card.scrollWidth - card.clientWidth),
+        cards: document.querySelectorAll('.msg.own .file').length,
+        queue: document.querySelectorAll('.queue .pill').length,
+        btnInsideCard: btn.getBoundingClientRect().right <= card.getBoundingClientRect().right + 1
+      };
+    });
+    const ok =
+      g.cards === 2 && g.queue === 0 &&
+      g.icon.w <= 40 && g.icon.h <= 40 && g.meta.w >= Math.round(g.card.w * 0.4) &&
+      g.name.w > 0 && g.size.h <= 20 && g.overflow <= 1 && g.btnInsideCard;
+    record(
+      'a file card keeps its name, size and button in place',
+      ok ? 'PASS' : 'FAIL',
+      `card ${g.card.w}x${g.card.h} overflow ${g.overflow}px; icon ${g.icon.w}x${g.icon.h}; text column ${g.meta.w}px; name ${g.name.w}px; size "${g.sizeText}" ${g.size.h}px tall; button inside=${g.btnInsideCard}; picker sent 2, cards on screen ${g.cards}, queue left ${g.queue}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the file card gives its text room and keeps the button inside`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+/**
+ * Labels that sit low inside their own pill, and a CJK glyph that sits off-centre inside its
+ * avatar square. Both are measured, not eyeballed: the centre of the text box (a Range over the
+ * control's contents) against the centre of the control's own box.
+ */
+async function controlLabelsSitOnTheCenterLine(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  let bCtx = null;
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page.locator('.composer textarea').fill(Array.from({ length: 20 }, (_, i) => `居中判据第 ${i + 1} 行`).join('\n'));
+    await a.page.keyboard.press('Enter');
+    try {
+      await a.page.waitForSelector('.expand', { timeout: 20000 });
+    } catch (err) {
+      const stuck = await chatState(a.page);
+      record(
+        'button and avatar labels sit on their own center line',
+        'FAIL',
+        `${String(err.message).split('\n')[0].slice(0, 120)}; the 20-line message never produced a 展开全文 control; page: ${JSON.stringify(stuck)}`
+      );
+      emit('FAIL labels are centred inside their controls: no .expand');
+      return;
+    }
+    // A peer row is needed for the avatar square to exist at all (own rows carry no avatar).
+    const link = await inviteLink(a.page, origin, roomId);
+    bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+    const bPage = await bCtx.newPage();
+    await gotoPage(bPage, link);
+    await acceptNickname(bPage);
+    await bPage.waitForSelector('.composer textarea', { timeout: 30000 });
+    await bPage.locator('.composer textarea').fill('居中判据-对端这条要有头像和名字');
+    await bPage.keyboard.press('Enter');
+    await a.page.waitForSelector('.msg:not(.own) .av', { timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 600));
+    const read = () =>
+      a.page.evaluate(() => {
+        const centre = (el) => {
+          const b = el.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const t = range.getBoundingClientRect();
+          return { dy: Math.round(((t.top + t.height / 2) - (b.top + b.height / 2)) * 10) / 10, h: Math.round(b.height * 10) / 10, th: Math.round(t.height * 10) / 10 };
+        };
+        const out = {};
+        const send = document.querySelector('.composer .send');
+        if (send) out.send = centre(send);
+        const expand = document.querySelector('.expand');
+        if (expand) out.expand = centre(expand);
+        // Named by which square it is: the first `.av` on a room page is the header chip, not the
+        // message avatar, and a reading that says "avatar" while measuring the header proves
+        // nothing about the row the reader complained about.
+        const peerAv = document.querySelector('.msg:not(.own) .av');
+        if (peerAv) out.peerAvatar = centre(peerAv);
+        const headAv = document.querySelector('.me .av');
+        if (headAv) out.headChip = centre(headAv);
+        // The pill that only appears on hover is the one the reader called off-centre. It is still
+        // laid out while transparent, so its geometry can be measured without hovering.
+        const chip = document.querySelector('.tail .copy-msg');
+        if (chip) out.hoverChip = centre(chip);
+        return out;
+      });
+    const g = await read();
+    // The home page's own controls, in the same browser context: a fresh context has no vault, so
+    // its history list is empty and there would be nothing to measure.
+    const hp = await a.context.newPage();
+    await gotoPage(hp, `${origin}/`);
+    await hp.waitForSelector('.btnrow .btn', { timeout: 20000 });
+    const homeG = await hp.evaluate(() => {
+      const seen = [];
+      for (const el of document.querySelectorAll('.btn, .pill, .link-btn')) {
+        const b = el.getBoundingClientRect();
+        if (b.height < 1) continue;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const t = range.getBoundingClientRect();
+        if (t.height < 1) continue;
+        seen.push({
+          label: (el.textContent || '').trim().slice(0, 10),
+          dy: Math.round(((t.top + t.height / 2) - (b.top + b.height / 2)) * 10) / 10
+        });
+      }
+      return seen;
+    });
+    await hp.close();
+    const worst = Math.max(
+      ...Object.values(g).map((v) => Math.abs(v.dy)),
+      ...homeG.map((v) => Math.abs(v.dy))
+    );
+    const ok = Object.keys(g).length >= 4 && homeG.length >= 2 && worst <= 1.5;
+    record(
+      'button and avatar labels sit on their own center line',
+      ok ? 'PASS' : 'FAIL',
+      `room offsets ${JSON.stringify(g)}; home ${JSON.stringify(homeG)}; worst ${worst}px over ${Object.keys(g).length + homeG.length} control(s); room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} labels are centred inside their controls`);
+  } finally {
+    if (bCtx) await bCtx.close().catch(() => {});
+    await a.context.close();
+  }
+}
+
+/**
+ * "展开全文" for a message long enough to need scrolling: the text must scroll inside its own
+ * region and the two buttons must stay reachable, instead of the dialog growing past the screen.
+ */
+async function longMessageModalScrollsInPlace(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const long = Array.from({ length: 90 }, (_, i) => `第 ${i + 1} 行 判据正文`).join('\n');
+    await a.page.locator('.composer textarea').fill(long);
+    await a.page.keyboard.press('Enter');
+    await a.page.waitForSelector('.expand', { timeout: 30000 });
+    await a.page.locator('.expand').click();
+    await a.page.waitForSelector('.scroll-box', { timeout: 20000 });
+    await new Promise((r) => setTimeout(r, 500));
+    const g = await a.page.evaluate(() => {
+      const box = document.querySelector('.scroll-box');
+      const modal = box.closest('.modal');
+      const close = [...modal.querySelectorAll('button')].map((b) => b.getBoundingClientRect()).filter((r) => r.height > 0);
+      const vh = window.innerHeight;
+      box.scrollTop = box.scrollHeight;
+      const max = box.scrollTop;
+      return {
+        scrollable: box.scrollHeight > box.clientHeight + 20,
+        ratio: Math.round((box.scrollHeight / box.clientHeight) * 10) / 10,
+        modalH: Math.round(modal.getBoundingClientRect().height),
+        viewportH: vh,
+        buttonsInside: close.length >= 2 && close.every((r) => r.top >= 0 && r.bottom <= vh),
+        reachedEnd: max + box.clientHeight >= box.scrollHeight - 2,
+        lastLine: (box.querySelector('.full-text')?.textContent || '').trim().slice(-8)
+      };
+    });
+    const ok = g.scrollable && g.buttonsInside && g.reachedEnd && g.modalH <= g.viewportH;
+    record(
+      'the full-text dialog scrolls and keeps its buttons on screen',
+      ok ? 'PASS' : 'FAIL',
+      `box ${g.ratio}x taller than itself; modal ${g.modalH}px in a ${g.viewportH}px viewport; buttons inside=${g.buttonsInside}; scrolled to end=${g.reachedEnd}; tail "${g.lastLine}"; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} a long message scrolls inside its dialog with the buttons reachable`);
+  } finally {
+    await a.context.close();
+  }
+}
+
 async function destroyLeavesTheRoom(browser, origin, emit) {
   const a = await openHome(browser, origin);
   const bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -1407,7 +1924,11 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
   const httpsPort = await freePort();
   const httpProbe = `http://127.0.0.1:${httpPort}`;
   const httpsOrigin = `https://127.0.0.1:${httpsPort}`;
-  const baseEnv = { ...process.env, NODE_ENV: 'production', LOG_LEVEL: 'info', PUBLIC_BASE_URL: '', TRUST_PROXY: '' };
+  // MAX_ROOMS is raised for the lane only: every leg creates its own room and rooms stay counted
+  // through their idle grace, so 21 legs would otherwise start being refused by the node-wide
+  // ceiling this machine ships with (default 20) - a capacity rule that is itself judged by the
+  // governance lane against its own server, not by these legs.
+  const baseEnv = { ...process.env, NODE_ENV: 'production', LOG_LEVEL: 'info', PUBLIC_BASE_URL: '', TRUST_PROXY: '', MAX_ROOMS: '80' };
   delete baseEnv.TLS_KEY_FILE;
   delete baseEnv.TLS_CERT_FILE;
 
@@ -1487,6 +2008,11 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['first run names the device and identity reaches peers', () => firstRunNicknameAndIdentity(browser, httpOrigin, emit)],
           ['an uploaded image reaches the other device', () => imageReachesPeerInOneBox(browser, httpOrigin, emit)],
           ['joined rooms appear as history on the home page', () => joinedRoomIsOfferedAsHistory(browser, httpOrigin, emit)],
+          ['scrolling up through history keeps the row you are looking at', () => historyScrollKeepsItsPlace(browser, httpOrigin, emit)],
+          ['a paste sends every file the clipboard carries', () => clipboardPasteSendsEveryItem(browser, httpOrigin, emit)],
+          ['a file card keeps its name, size and button in place', () => fileCardKeepsItsTextColumn(browser, httpOrigin, emit)],
+          ['button and avatar labels sit on their own center line', () => controlLabelsSitOnTheCenterLine(browser, httpOrigin, emit)],
+          ['the full-text dialog scrolls and keeps its buttons on screen', () => longMessageModalScrollsInPlace(browser, httpOrigin, emit)],
           ['destroying leaves the room and returns home', () => destroyLeavesTheRoom(browser, httpOrigin, emit)]
         ];
         if (httpsSrv) checks.push(['https lock tooltip', () => tooltipMode(browser, httpsOrigin, true, 'https lock tooltip', emit)]);
