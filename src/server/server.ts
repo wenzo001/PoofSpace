@@ -24,6 +24,7 @@ export interface RunningServer {
 }
 
 type NextHandler = (req: http.IncomingMessage, res: http.ServerResponse, parsed: { pathname: string }) => Promise<void>;
+type NextUpgrade = (req: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => void;
 
 /**
  * Only headers we can honestly guarantee. The fragment with the invite secret never
@@ -85,12 +86,17 @@ export async function createServer(overrideCfg: Partial<AppConfig> = {}): Promis
   service.start();
 
   let nextHandler: NextHandler | null = null;
+  let nextUpgrade: NextUpgrade | null = null;
   if (cfg.env !== 'test') {
     const nextPkg = await import('next');
     const nextFactory = (nextPkg as unknown as { default: typeof import('next').default }).default ?? (nextPkg as unknown as typeof import('next').default);
     const app = nextFactory({ dev: cfg.env === 'development', dir: process.cwd() });
     await app.prepare();
     const handler = app.getRequestHandler();
+    // Next's dev client opens a WebSocket under /_next/ for hot reload. If that upgrade is
+    // refused the client never finishes booting: the page renders, React never hydrates, and
+    // every button on the screen is inert. Only dev serves that path.
+    if (cfg.env === 'development') nextUpgrade = app.getUpgradeHandler();
     nextHandler = (req, res, parsed) =>
       handler(req, res, parsed as unknown as Parameters<typeof handler>[2]);
   }
@@ -125,11 +131,17 @@ export async function createServer(overrideCfg: Partial<AppConfig> = {}): Promis
 
   server.on('upgrade', (req, socket, head) => {
     const parsed = parseUrl(req.url ?? '/ws');
-    if (parsed.pathname !== '/ws') {
-      socket.destroy();
+    if (parsed.pathname === '/ws') {
+      hub.onUpgrade(req, socket as import('node:net').Socket, head);
       return;
     }
-    hub.onUpgrade(req, socket as import('node:net').Socket, head);
+    // Only the dev runtime owns other upgrade paths (`/_next/hmr`). In production this server
+    // accepts exactly one upgrade path, so an unknown upgrade still loses its socket.
+    if (nextUpgrade && parsed.pathname.startsWith('/_next/')) {
+      nextUpgrade(req, socket as unknown as import('node:stream').Duplex, head);
+      return;
+    }
+    socket.destroy();
   });
 
   server.on('clientError', (_err, socket) => {
