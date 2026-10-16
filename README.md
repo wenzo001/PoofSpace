@@ -22,7 +22,7 @@ project: those are exactly the things PoofSpace refuses to keep.
 | | |
 | --- | --- |
 | **Create → share** | 128-bit random room id + 256-bit secret generated **in the browser**. The secret travels only in the URL `#` fragment, which never reaches a server, and in the invite code you paste to whoever you invite. |
-| **Enter → chat** | Text messages plus arbitrary files/images, encrypted client-side before upload. Late joiners can decrypt and read the history that is still held. |
+| **Enter → chat** | Text messages plus arbitrary files and images, encrypted client-side before upload. Several at once: select many in the file picker, or paste a screenshot, a copied image or a copied file anywhere on the page — the clipboard's *files* are sent, its text is left to the input box. Late joiners can decrypt and read the history that is still held. |
 | **Last one out → countdown** | `ACTIVE → IDLE_GRACE (300 s) → DESTROYING → DESTROYED`. Anyone holding the invite can walk back into **the same room** during the window; the countdown is cancelled, history intact. |
 | **Auto destroy** | No manual cleanup needed. Destroy removes ciphertext, attachment chunks, partial uploads, sessions and the room row itself — a destroyed room leaves **no database record at all**. |
 | **Server can't read it** | The server stores room state, random ids, ciphertext and minimal run metadata. It never receives a key, plaintext, filename, or MIME type. |
@@ -129,9 +129,11 @@ was deliberately broken and the gate was required to go red — and skipped chec
 passing (`SKIP` is a distinct verdict, and the strict table fails on it).
 
 Current state: **16 gates PASS / 0 FAIL / 0 SKIP** (`npm run gates`), 157 automated checks, plus a
-real-browser lane (16 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
+real-browser lane (21 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
 non-secure context, where `crypto.subtle` is absent and the bundled pure-JS AES-GCM path is used) and
-real TLS. Highlights:
+real TLS. The 100-member lane has died before printing a single assertion on roughly half of the
+full-table runs on the development machine (`0 files, 0 tests` + `ERR_IPC_CHANNEL_CLOSED`); a crashed
+lane is never counted as a pass, and the open investigation is `docs/DEBT.md` D26. Highlights:
 
 - Ciphertext-only at rest: the same plaintext marker is searched for in outgoing WebSocket frames, the
   SQLite file and the room temp directory — and must appear in none of them.

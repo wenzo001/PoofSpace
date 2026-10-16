@@ -15,6 +15,28 @@ Everything here came out of using the app in a browser, not out of the specifica
 
 ### Fixed
 
+- A queued upload no longer stalls the rest of the queue. The serial upload lock was released in a
+  `finally()` that runs after React has already flushed the state update, so the effect re-ran while
+  the lock was still held and every file after the first waited forever at "0/N chunks". Selecting or
+  pasting several files now sends all of them. The queue pill also says `排队中` for a job that has
+  not started, instead of calling it `上传中`.
+- Scrolling up through a room's history no longer drags the canvas back down. Three separate causes:
+  the list and the browser were both holding the scroll position (`.list` now sets
+  `overflow-anchor: none`, so exactly one owner decides), the hold was taken from a `scrollTop` that
+  lagged the reader's own gesture by a frame, and the correction cancelled a wheel turn that had
+  already landed instead of only compensating content that moved underneath. Measured on a late
+  joiner in a 101-message room: steady steps `0px` (was −12…−16px per step), the step where a whole
+  page of older history lands `260px` (was `4118px`). The remaining step's worth is registered as
+  `docs/DEBT.md` D28, not claimed as fixed.
+- A file card is a card again. Its icon had no size rule anywhere in the stylesheet, and an SVG with a
+  viewBox inside a flex row takes the full containing-block width — measured 403×403 — so the name
+  collapsed to zero width, the size text stacked one glyph per line and the download button was pushed
+  outside the card. Now `icon 32x32; text column 327px; overflow 0px; button inside=true`.
+- 展开全文 no longer expands the bubble underneath the dialog. Growing that row re-windowed the list,
+  unmounted the row, and the dialog was rendered by that row — so opening it destroyed it. The bubble
+  keeps its excerpt; the dialog does the reading, and it now scrolls inside its own box with both
+  buttons reachable (`modal 559px in a 720px viewport; scrolled to end=true`).
+
 - `npm run dev` was inert: the custom server destroyed every WebSocket upgrade that was not `/ws`,
   which killed Next's dev hot-reload socket, so the page rendered but React never hydrated and every
   button on screen did nothing. Only the dev runtime now receives non-`/ws` upgrades; production
@@ -41,8 +63,41 @@ Everything here came out of using the app in a browser, not out of the specifica
   reaches a 44px band without growing the visible pill, and copies the selected text when the reader
   has selected some.
 - The home page's list of this device's still-live rooms is labelled as history.
+- Labels sit on their control's centre line now. Buttons and pills that had a `min-height` and
+  padding but no centring box pushed their text toward the top — measured with a `Range` over each
+  control's contents, the worst offset across seven controls went from 12px (the home page's
+  恢复进入 link, a 44px-tall anchor whose text sat at the top) to **0.5px**.
+- The per-message copy control is no longer a bordered button. It is a grey text pill
+  (`--mute`, 11px, no border) that only gets a background on hover; measured contrast against its
+  own bubble is 5.06:1, so weakening it did not take it below AA for small text.
+- Chat is tighter and reads as one system: rows `2px` apart, bubbles `5px 10px` on a 16px radius with
+  `line-height: 1.4`, a 26px peer avatar, tabular numerals on timestamps, a translucent
+  `saturate + blur` header and composer over a single hairline, `scale(0.97)` press feedback on every
+  tappable control, and overlay scrollbars. Own rows carry no avatar or author label.
+- The keyboard focus ring is 1.5px with a 1px offset instead of 2px with 2px: still the same
+  full-contrast teal, because it is the only indicator a keyboard reader gets, but it no longer
+  out-shouts the message list.
+- 展开全文 excerpts at 180 characters or 6 lines (was 280/10) so a long message costs the list one
+  short row instead of a screen, and the dialog's text scrolls in its own box.
+- The upload queue names its states honestly: `排队中` for a job that has not started, `上传中` for
+  one that is transferring, `失败` with a retry control.
 
 ### Testing
+
+- The real-browser lane grew from 10 legs to 16, then to 21 in the same release: clipboard paste
+  carrying every item, a file card judged on its rendered geometry, label centring measured with a
+  `Range` over each control's contents, the full-text dialog judged on scrolling inside its own box,
+  and a late joiner scrolling up through a page of history they never saw live.
+- Two instrument lessons came out of this round and both changed how a leg is written. A leg that
+  reads the geometry only *after* the page settles measures whether a still page stays still — which
+  it always does, fixed or broken — so the scroll leg now takes its baseline in the same task as the
+  gesture. And with the browser's own scroll anchoring left enabled, that leg read `0px` whether the
+  product held the row or not; a judgement that cannot be made red is not a judgement, so `.list`
+  sets `overflow-anchor: none` and the leg reads `4118px` on the broken build.
+- Red legs now dump the page they are waiting on (`chatState`) instead of timing out, which is how the
+  multi-file stall was named (`queue="排队中 剪贴板里的文件.txt 0/1块"`) rather than guessed at.
+- The lane boots with `MAX_ROOMS=80`: its own legs create more rooms than the shipped default of 20,
+  and a capacity ceiling reached by the harness is not a product refusal.
 
 - The real-browser lane grew from 10 legs to 16: first-run naming, an uploaded image reaching the
   other device, joined rooms appearing as history, both devices landing on the home page after a
@@ -51,9 +106,11 @@ Everything here came out of using the app in a browser, not out of the specifica
 - `npm test` runs the suite in two invocations so the 100-member lane gets its own process, and the
   test bed retries a WebSocket *connect* that the operating system refused — never a `ROOM_FULL` or
   any product refusal (proved by re-refusing every join and watching the lane go red).
-- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 16 browser
-  legs. Mutation evidence per judgement, including three knives that came back as equivalent
-  mutations and are recorded as gaps rather than as passes, in `docs/TEST-REPORT.md` §7.7 and `docs/DEBT.md` D21–D27.
+- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 21 browser
+  legs. Mutation evidence per judgement — seven knives this round, each proven red at the layer the
+  harness actually boots — plus three earlier knives that came back as equivalent mutations and are
+  recorded as gaps rather than as passes, in `docs/TEST-REPORT.md` §7.7 and §7.9 and `docs/DEBT.md`
+  D21–D29.
 
 ## 1.0.0 — 2026-10-15
 

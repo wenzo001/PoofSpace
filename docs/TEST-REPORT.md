@@ -22,6 +22,15 @@
 两种形状（子进程静默死掉 / 只剩 `long-run storage hygiene` 一条红，D26）。两条都登记在册，
 没有用"再跑一遍就绿"冒充排除；该抖动腿在换成"按到达定界"之后单独整跑 11 遍：绿 9、红 2，红的那两遍
 读数与其它红遍同签名。逐刀台账在 `scratch/mutation-ledger-spec8.md` 的"追加""追加二"两节。
+
+**第四轮（同日更晚：用户手测出来的八条界面与滚动问题）**：最新一次整台面 `scratch/gates-G.log` =
+**16/16 PASS、0 FAIL、0 SKIP**、`GATES_EXIT=0`；157 条自动化判据（T1 62 + T2 26 + T3 30 + T4 9 + T6 30），
+浏览器线 **21 条腿**（§2 的逐条读数取自 `scratch/lane-21e.log`，与台面里那条 T5 同一棵树）。
+**这一轮台面不是一遍就绿**：同一棵树今天整跑 5 遍 —— `gates-C` 16/0/0、`gates-D/E/F` 各 **15 PASS + T4 崩**
+（`0 files, 0 tests` + `ERR_IPC_CHANNEL_CLOSED`）、`gates-G` 16/0/0。崩与绿之间目前唯一抓到的差别是台面
+自己打印的占用读数：**崩的三遍 `chrome=9`，绿的两遍 `chrome=0`**（node 数与空闲内存都不区分），登记在 D26；
+浏览器线另有两遍红在抖动腿（整跑红、单跑绿），登记在 D27。八条要求逐条的读数与七把刀在 **§7.9**，
+两条没做到的事在 **D28**（整页历史落地那一步仍差一个滚轮步长）与 §7.9 末（"原生感/弱化"没有可证伪判据）。
 这一轮判定的是**补充规范《临时数据、房间销毁、容量限制与服务器管理》落地之后的树**：
 `ACTIVE → IDLE_GRACE(300 s) → DESTROYING → DESTROYED`、`MAX_ROOMS=20` 的名额账、销毁后不留房间记录、
 超出 `DELETE` 的存储清理（WAL/SHM/自由页）、以及只在本地跑的两条运维命令。新增的 30 条治理判据与
@@ -49,8 +58,8 @@
 | T1 | 功能线（创建/分享/加入/恢复、昵称、分页、容量） | PASS | 3 文件 62 条 |
 | T2 | 安全线（静态无明文、服务端不可解、伪造/重放/跨房间被拒） | PASS | 2 文件 26 条（本轮多的那一条是 `confines the dev eval exemption to the development policy`，见 §7.7 与 D22） |
 | T3 | 生命周期线（`ACTIVE→IDLE_GRACE(300 s)→DESTROYING→DESTROYED`、重启、凭据失效） | PASS | 4 文件 30 条（含 299 s 回原房间、301 s 被拒、刷新不销毁、宕机过期、房间互不影响） |
-| T4 | 性能线（100 成员、广播、重连抖动、大文件与文字并行、不增长） | PASS | 2 文件 9 条，59.9 s（台面里这条腿用 `--no-file-parallelism` 串行跑，理由见 §1.1 与 D13；本轮它红过三次，签名见 D26） |
-| T5 | 真实浏览器线整体 | PASS | 16 条腿全绿（逐条读数见 §2；本轮新增六条腿与两处换形，见 §7.7。它在这一轮红过三次，签名是"帧根本没到"，登记为 D27） |
+| T4 | 性能线（100 成员、广播、重连抖动、大文件与文字并行、不增长） | PASS | 2 文件 9 条，71.9 s；台面自己打印占用与退出码：`machine before[node=13 chrome=0 memFreeMiB=7243/32519] after[node=14 chrome=0 …] exit=0` —— **这一遍绿的时候 chrome=0，而今天崩的三遍都是 chrome=9**，第一条正向线索。串行跑（`--no-file-parallelism`）的理由见 §1.1 与 D13，崩的登记在 D26 |
+| T5 | 真实浏览器线整体 | PASS | 21 条腿全绿（逐条读数见 §2；本轮新增五条腿与三处换形，见 §7.9。它在整跑里红过两次，签名是抖动腿「帧根本没到」而单跑全绿 —— 登记在 D27） |
 | T6 | 治理线（`MAX_ROOMS` 名额账、严禁长期保存的清理证明、本地运维命令） | PASS | 3 文件 30 条；`every tests/ directory is claimed by a lane`（这条腿还先把"磁盘上的测试目录有没有台面认领"双向差集扫了一遍，漏一个就 FAIL） |
 
 ### 1.1 全量 vitest（并发跑整棵 `tests/`）的三次独立读数 —— 压力腿的抖动率在这里
@@ -76,46 +85,74 @@
 **注意记账口径**：这条新判据是本批自己加的，不算本批的证人；本批的证人是台面 T4 本身 —— 改前 `FAIL (65.0s)`、改后 `PASS (64.6s) 2 files, 9 tests`
 （`scratch/gates-final3.log` vs `scratch/gates-grace.log`）。剩下那条 12:29 的"10 s 定点预约超时"未复现，按 D13 单独记账，不当成已修。
 
-## 2. 真实浏览器线的逐条读数（chromium，16 条腿 / `LANE_EXIT=0`）
+## 2. 真实浏览器线的逐条读数（chromium，21 条腿 / `LANE_EXIT=0`）
 
 `node scripts/run-browser-tests.mjs` 在 `http://poof.insecure:PORT`（非安全上下文）与
 `https://127.0.0.1:PORT`（真 TLS）两个来源上各起一台**独立 DATA_DIR** 的服务，最后一次全绿的读数
-（`scratch/lane-o1.log`，逐字截断到行宽）：
+（`scratch/lane-21d.log`，逐字截断到行宽）：
 
 ```
+PASS recovery entry disappears after destroy: other device's card before=1 after=0; server said
+     not-joinable=true; vault entry left=false; states=none
+PASS served html makes no transport assurance: status=200; tooltip present in first paint=true; https
+     claim in served bytes=false; http-warning copy present=true
 PASS home two entries: primary buttons ["创建聊天室","加入聊天室"]; account affordances 0
-PASS insecure context crypto: subtle=false secure=false; marker rendered=true;
-     plaintext in 0 outgoing frames: 0; in sqlite: false; in room temp files: false
-PASS history decrypts for a late joiner: guest rendered the host message 1 time(s)
-PASS recovery entry disappears after destroy: other device's card before=1 after=0;
-     server said not-joinable=true; vault entry left=false; states=none
-PASS http lock tooltip: isSecureContext=false; tooltip matches the protocol;
-     before opening it the text claimed https=false
-PASS served html makes no transport assurance: status=200; tooltip present in first paint=true;
-     https claim in served bytes=false; http-warning copy present=true
-PASS no rng no send: renderer crashed=false; create requests=0; notice count=1;
-     notice text="CSPRNG unavailable: crypto.getRandomValues is missing in this context"; page errors=0
-PASS browser notification content: backgrounded+granted notifications=
-     [{"title":"收到一条加密消息","body":""}] (expected exactly 1, message marker absent);
-     foregrounded+granted total=1 (expected 1); backgrounded+denied total=1 (expected 1)
-     while all three bubbles rendered
-PASS virtual list geometry: sent 120: rendered rows 15, bubbles 15, sizer 8400px vs viewport 586px,
-     short rows 0, stacked rows 0
-PASS pinned list holds on incoming: frames 56/56/74; sizer-growth at 24ms/21ms;
-     inbound-frame seen at 24ms/21ms; single arrival travel 92px reversals 0 sizer +92px vs row 92.3px
-     distance 0; burst travel 92px reversals 0 distance 0
-PASS copy control reveals and honors the selection: hover: opacity 0->1;
-     selected "复制判据探针：前半" copied="复制判据探针：前半"; touch: coarse=true opacity=1 pill=28px
-     bandAbove=true bandBelow=true
-PASS first run names the device and identity reaches peers: gate offered=1 roomIdBefore=0;
-     suggestion=… reroll=… cached=…; peer gate=1 author label seen by peer=cached;
-     own row av=0 author=0 h=70.3 vs peer av=1 h=92.3
+PASS insecure context crypto: subtle=false secure=false; marker rendered=true; plaintext in 0 outgoing
+     frames: 0; in sqlite: false; in room temp files: false
+PASS history decrypts for a late joiner: guest rendered the host message 1 time(s); room shown
+     ri6vna5vcw2gqdhbhakl2olzqm
+PASS http lock tooltip: isSecureContext=false; tooltip matches the protocol; before opening it the text
+     claimed https=false
+PASS no rng no send: renderer crashed=false; navigated to http://poof.insecure:63383/; create
+     requests=0; notice count=1; notice
+     text="CSPRNGunavailable:crypto.getRandomValuesismissinginthiscontext"; page errors=0 []
+PASS browser notification content: backgrounded+granted notifications=[{"title":"收到一条加密消息","body":""}]
+     (expected exactly 1, message marker absent); foregrounded+granted total=1 (expected 1);
+     backgrounded+denied total=1 (expected 1) while all three bubbles rendered
+PASS virtual list geometry (tawwdm): sent 120: rendered rows 16, bubbles 16, sizer 7680px vs viewport
+     594px, short rows 0, stacked rows 0
+PASS pinned list holds on incoming: frames 56/56/74; sizer-growth at 25ms/22ms; inbound-frame seen at
+     25ms/22ms of 926/1223ms sampled; end-of-single-window: sh=1840 hasSingle=true rows=13
+     sender-had-written=24 frames (sender open at 256ms); reader rows=13 sawSingle=true sawBurst=true
+     received=28 notice="" ws=[{"t":112,"kind":"open","code":0,"msgs":28}]; sender failed=0 sending=0
+     written=26 tail=["抖动探针-单条 短短短","抖动探针-多行\n第二行内容 ","抖动探针-第二条"]; idle travel 0px over 1 position(s);
+     single arrival: travel 80px reversals 0 sizer +80px vs row 79.6px distance 0; burst: travel 179px
+     reversals 0 sizer +179px vs row 79.6px distance 0; room pp5fbi
+PASS copy control reveals and honors the selection: hover: opacity 0->1; selected "复制判据探针：前半"
+     copied="复制判据探针：前半" whole=true; touch: coarse=true hoverNone=true opacity=1 pill=22x40px band=44x45px
+     reach {"up":22,"down":0,"left":3,"right":2} under="div.list"
+PASS first run names the device and identity reaches peers: gate offered=1 roomIdBefore=0
+     suggestion="曹伟禾" reroll="严明野" cached="严明野"; peer gate=1 peer nick="杨乐晨" author label seen by
+     peer="严明野"; own row av=0 author=0 h=63.6 vs peer av=1 h=79.6; room yopudc
 PASS an uploaded image reaches the other device: peer rows 1, img.thumb 1, naturalWidth>0 1,
-     placeholders 0; bytes 326
-PASS joined rooms appear as history on the home page: section "历史"; state "房间仍在进行"
-PASS destroying leaves the room and returns home: creator path "/", member path "/",
-     server not-joinable=true (after 1 polls)
-PASS https lock tooltip: isSecureContext=true; tooltip matches the protocol
+     placeholders 0; room bqi7zs; bytes 326
+PASS joined rooms appear as history on the home page: section "历史" rows ["#7oclhwr"] wants 7oclhwri
+     state "房间仍在进行"
+PASS scrolling up through history keeps the row you are looking at: joiner found 13 mounted row(s) in a
+     101-message room, row height 79.6px (list 4092px); reader gestured up 3640px in 14 step(s) and the page
+     ended -528px further down than it started; older pages seen 1; list grew 3908px; steady worst 0px over
+     13 step(s); page-arrival worst 260px over 1 arrival step(s); overall worst 260px; steps ["0:0px rows16
+     sh4080 top3226","1:0px rows19 sh4068 top2954","2:0px rows20 sh4052 top2678","3:0px rows19 sh4040
+     top2406","4:0px rows19 sh4028 top2134","5:0px rows19 sh4016 top1862","6:0px rows20 sh4000
+     top1586","7:0px rows19 sh4000 top1326","8:0px rows19 sh4000 top1066","9:0px rows19 sh4000
+     top806","10:0px rows20 sh4000 top546","11:0px rows17 sh4000 top286","12:-260px rows19 sh8000
+     top4286","13:0px rows19 sh8000 top4026"]; room 4gbc6u
+PASS a paste sends every file the clipboard carries: clipboard handed 3 item(s) (3 files); rendered img
+     2 decoded 2 colours ["#3266cc","#cc3467"] distinct=true, file cards 1 named ["剪贴板里的文件.txt"], queue left
+     []; room jq7mdx
+PASS a file card keeps its name, size and button in place: card 467x40 overflow 0px; icon 32x32; text
+     column 327px; name 327px; size "1.3 KB" 17px tall; button inside=true; room b5kxnw
+PASS button and avatar labels sit on their own center line: room offsets
+     {"send":{"dy":0,"h":44,"th":18},"expand":{"dy":-0.5,"h":32,"th":15},"avatar":{"dy":-0.5,"h":28,"th":15},
+     "hoverChip":{"dy":-0.5,"h":22,"th":14}}; home
+     [{"label":"创建聊天室","dy":0},{"label":"加入聊天室","dy":0},{"label":"校验中","dy":-0.5}]; worst 0.5px over 7
+     control(s); room gg2wha
+PASS the full-text dialog scrolls and keeps its buttons on screen: box 5.1x taller than itself; modal
+     559px in a 720px viewport; buttons inside=true; scrolled to end=true; tail "0 行 判据正文"; room mgxvtw
+PASS destroying leaves the room and returns home: creator path "/", member path "/", server
+     not-joinable=true (after 1 polls)
+PASS https lock tooltip: isSecureContext=true; tooltip matches the protocol; before opening it the text
+     claimed https=false
 ```
 
 要点：
@@ -129,7 +166,7 @@ PASS https lock tooltip: isSecureContext=true; tooltip matches the protocol
   绿的时候它们重合（24ms/24ms），红的时候后者是 `never` ⇒ 一眼分辨"帧没到"与"页面包住了不画"。见 §7.7 与 D27。
 
 > 工装说明：`node scripts/run-browser-tests.mjs --only <子串>` 只跑被点名的腿，用于给单条判据下刀而不必整跑全条线。
-> **它不能读成台面结论** —— 过滤后的那一趟会自己记一条 `SKIP lane scope: 跑了 N/16 条腿`，退码因此是 1；
+> **它不能读成台面结论** —— 过滤后的那一趟会自己记一条 `SKIP lane scope: 跑了 N/21 条腿`，退码因此是 1；
 > 只有不带 `--only` 的整跑（本报告 §2 与台面 B6/T5）才是 `PASS`。
 
 ## 3. 判据自己的证人（变异测试）
@@ -487,3 +524,51 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
   这一条后果。
 - 建仓与推送仍归执行人：本轮只在本地提交、打标签。
 
+
+### 7.9 用户手测出来的八条（2026-10-16 下午，第四轮）
+
+八条要求全部来自"用了一遍界面"的现场，不是规范。逐条给读数，逐条下刀。
+
+| 要求 | 现场是什么问题 | 修完之后（浏览器线读数） | 刀（把它改回坏样子，该腿必须红） |
+| --- | --- | --- | --- |
+| 文件卡片样式坏了 | 图标没有任何尺寸规则：flex 行里带 viewBox 的 SVG 会吃掉整个容器宽度 | `card 467x40 overflow 0px; icon 32x32; text column 327px; name 327px; size "1.3 KB" 17px tall; button inside=true` | 删掉 `.file .icon` 的 width/height ⇒ `icon 403x403; text column 0px; name 0px; size 84px tall; button inside=false` ⇒ 红 |
+| 全局粘贴：剪贴板里的图片与文件都要发得出去 | 只有光标在输入框里时才粘得动 | 无焦点粘贴 3 项（两张异色 PNG + 一个 txt）⇒ `rendered img 2 decoded 2 colours ["#3266cc","#cc3467"] distinct=true, file cards 1 named ["剪贴板里的文件.txt"], queue left []` | 在处理器开头加 `if (document.activeElement?.tagName !== 'TEXTAREA') return;` ⇒ `page {"on":"room","msgs":0,"queue":"empty"}`（什么都没排进去）⇒ 红 |
+| 支持多文件发送 | **真缺陷**：串行上传把锁在 `.finally()` 里释放，而 React 这次 render 排在同一条微任务链更早的位置 ⇒ effect 再查队列时锁还拿着，第二项永远等待 | 同一粘贴腿：三项全发出去、队列清空；文件卡那条腿另加一发 —— 选择框**一次选两个** ⇒ `picker sent 2, cards on screen 2, queue left 0`（两个入口共用同一条队列，所以两边都要有证人；判据钉在"屏上有两张卡"，不是 input 的 `multiple` 属性） | 把释放改回 `.finally()` ⇒ `page.waitForFunction: Timeout 45000ms exceeded; page {"imgs":1,"cards":0,"queue":"排队中 剪贴板里的文件.txt 0/1块"}` ⇒ 红 |
+| 长文本"展开全文"弹窗过长要能滚 | 弹窗跟着气泡一起把整行撑高 ⇒ 行被重排、窗口移动、渲染该行的组件被卸载，弹窗跟着消失 | `box 5.1x taller than itself; modal 559px in a 720px viewport; buttons inside=true; scrolled to end=true` | 让气泡在弹窗打开时也展开（`body = long && !full ? excerpt : text`）⇒ `Cannot read properties of null (reading 'closest')`（`.scroll-box` 随那一行一起没了）⇒ 红 |
+| 气泡还要更紧凑、视觉统一、要原生感 | 行高/气泡内边距/字号各自为政；头尾两块没有材质层次 | 行 `padding 2px 0`、气泡 `5px 10px / r16 / lh1.4`、头像 26px、时间与时间戳 `tabular-nums`；头部与输入条 `backdrop-filter: saturate(180%) blur(20px)` + 一条发丝线；按压 `scale(0.97)`；滚动条改为 overlay（`width:10px` + `background-clip:content-box` 的 3px 透明边框） | 见下面"复制键"那一刀（同一族的紧凑/命中区一起判） |
+| 按钮文字视觉不居中 | 给了 `min-height`/`padding` 却没给居中盒；`.link-btn` 是个 `min-height:44px` 的行内 `<a>`，字沉在顶部 | `send dy 0px (h44), expand -0.5px (h32), avatar -0.5px (h28), hover chip -0.5px (h22); home 创建聊天室 0 / 加入聊天室 0 / 恢复进入 -0.5` ⇒ 7 个控件最差 **0.5px** | 把居中那一组的 `align-items:center` 改成 `flex-start` ⇒ `send -15px, expand -9.5px, hoverChip -5px`（头像仍 -0.5，因为它走的是另一条 `display:grid; place-items:center`）⇒ 红。首页那颗在改之前实测 **-12px**，这条就是它掉下来的 |
+| 名字 hover 那枚样式视觉不居中 | 同上，且药丸本身太重（描边 + 实色） | 药丸降成一条灰字（`border-color:transparent; color:var(--mute); font-size:11px`），悬停才给 `var(--hover)` 底；`dy -0.5px` | 同上一刀；另外把药丸改回描边实色会让"视觉弱化"这条主张回到旧样子，但没有可量判据 —— 见本节末"没被认证的两条" |
+| 复制键太突兀，视觉弱化 | 每行都有一颗带边框的实心按钮 | `pill=22x40px`（可见）而命中区 `band=44x45px`；`reach {up:22, down:0, left:3, right:2}` | 把 `inset: -22px -3px 0 -3px` 收成 `-8px` ⇒ `band=30x45px` ⇒ 红 |
+
+向上滚历史会向下弹（这条最费工夫，三个阶段都有读数）：
+
+1. **先证明现场能复现**。原来那条腿是"我自己在房间里发 60 条，然后往上滚"，量不到用户说的现象；真正的现场是**迟到的新成员**：第一页只有 50 条，往上滚到顶会 `loadOlder()` 追加一整页。改成像用户那样（另一台设备先把 101 条历史写完，这台再点邀请链接进来），并且把"读到第 70ms 再取基准"改成**与手势同一个 task 里取基准** —— 前者把漂移烘进基准，于是修没修都读 0px。
+2. **浏览器也是一个执行者**。开着 Chromium 自带的 scroll anchoring 时，这条腿**无论有没有应用自己的保持都读 0px**（两遍实测），也就是假绿。`.list` 现在写 `overflow-anchor: none`，让滚动位置只有一个主人；这条腿才第一次读出差别。
+3. **三个阶段各自的读数**（同一条腿，101 条房间，14 步 × 260px）：
+   - 保持那一支整个摘掉：稳态每步 `-12 ~ -16px`，**整页历史落地那一步 `+4000px`、下一步 `-4118px`**，净位移 `-704px`（向上滚结果页面往下跑 = 用户说的"向下弹"）。
+   - 只补上"保持点按活着的 `scrollTop` 取，而不是按 React 状态取"：稳态 `0px`，但落地那步还差 `260px`，而且**下一步仍粘在 -260px**（保持把刚发生的一次滚轮当成误差纠回去了）。
+   - 再把纠正改成 `offsets[index] + dy + (本次 scrollTop - 取保持时 scrollTop)`：稳态 **0px / 13 步**，落地那一步 **260px / 1 步**，下一步 `0px`（不再粘住）。这就是现在绿着的形状。
+   - 剩下的 260px（恰好一个滚轮步长）**没有定罪**，按 `docs/DEBT.md` D28 登记；该腿的阈值现在写的是"稳态 ≤2px、落地步 ≤300px"，两个数都落在"坏样子"与"现样子"之间，不是猜的。要宣称"整页历史落地时纹丝不动"，得先把阈值收到 ≤2px 再跑绿。
+
+没被认证的两条（不许当成已做到）：
+
+- "原生感"与"更精致"是审美判断，能量的只有几何：字号/行高/圆角/命中区/居中偏差都有读数，但**没有一条判据规定它看起来像 macOS**。截图在 `scratch/shots/`（宽 1280×720 与窄 480×900 各三张），我自己看过，结论是几何一致、层次按 token 走；这条主张的可证伪形式仍然欠着。
+- 复制键"视觉弱化"只落了"描边去掉、颜色降成 `--mute`、悬停才给底"这个形状，没落判据（比如与气泡正文的对比度差值）。改回描边实色不会让任何一条腿变红。
+
+台面计数：本轮浏览器线 **21 条腿**（`scratch/lane-21e.log` = 21/21 PASS，exit 0；台面里 T5 用的是同一棵树的 `gates-G`）；`npm test` 除压力线那遍 **12 文件 / 148 条**全绿；刀共 **7 把**，全部按"先证明它会红"下在该腿真正启动的那一层（浏览器线跑的是 `dist/` + `.next/`，所以每把刀之后都重建）。
+
+### 7.10 第四轮的产物、标签，以及"被认证的那次编译"（2026-10-16）
+
+- 判定：`scratch/gates-G.log` = **16 PASS / 0 FAIL / 0 SKIP**，`GATES_EXIT=0`。同一棵树的另外四遍台面
+  （`gates-C/D/E/F`）读数是 16/0/0、15/1、15/1、15/1，红的都是 T4 崩，见 §0 与 D26。
+- **被认证的那次编译**：`release/build-info.json` 的 `builtAt=2026-10-16T07:08:20.316Z`、
+  `nextBuildId=862nnXfdWsmXov2g7JrSB`、`abi=137`。台面 B1 那一腿自己重建 `.next/` 与 `dist/`，
+  随后的打包复用的正是它 ⇒ 被认证的那次编译就是交付包里的代码字节。
+- **交付的那次打包**：最后还会用 `npm run release -- --no-build` 再走一次，只为把 §7.9/§7.10 的文档文字
+  拷进包里。那一步会改写 `builtAt` 与 tar 包字节数 —— 所以这两个读数**不在这里钉死**，按 §7.6 末的口径分开说：
+  代码树与编译产物同上，只多几页文档。
+- 版本与标签：`package.json` 停在 `1.0.1`，注解标签 `v1.0.1` 移到本轮最后一条提交（它从未推送过，
+  移动不重写任何公开历史）；**公开的 `v1.0.0` 不动**，仍指向 `e1958a5`。
+- Word 交付物：`docs/*.docx` 不进 git（`.gitignore:25`），本机用 `node scripts/md-to-docx.mjs <文件…>` 现生成。
+- 建仓与推送仍归执行人：公开线 `git push origin main && git push origin v1.0.1`；
+  公司线 `git checkout internal-deploy && git merge main && git push lc internal-deploy`（单向，main 不含公司配置）。

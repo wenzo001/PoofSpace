@@ -101,6 +101,13 @@ AAD 把上下文绑进认证标签：
 - 正文分片用 `fileKey`、`chunk = nonce(12) ‖ ciphertext ‖ tag(16)`；文件名/MIME/几何信息用 `metaKey` 单独密封。
 - 分片按块读出→分块加密→分块上传，**从不把整个文件读进内存**；上传队列有并发上界与每成员配额。
 - 服务端只写 `attachment_chunks` 字节，不生成缩略图、不做预览、不建明文索引。
+- 粘贴是同一个上传路径的另一个入口，不是第二条通道：页面只取剪贴板里的**文件**项（截图、复制的图片、
+  复制的文件），剪贴板的**文字**不读、不写、不进消息，仍交给输入框原本的行为。剪贴板来的文件若没有名字
+  （浏览器给的是 `image.png` / `blob`），只在**本地**补一个 `粘贴图片-时:分:秒` 式的名字；文件名与 MIME 仍然
+  走上面那条 `metaKey` 密封，服务端拿不到明文文件名。
+- 一次粘贴或一次多选的多个文件按串行队列逐个加密上传，任何一个失败都不会把别人的字节混进去：每个附件
+  有自己的 `attachmentId` 与自己的分片目录，判据 `refuses a chunk moved to another index or another attachment`
+  与 `rejects metadata whose declared geometry cannot hold the payload` 覆盖这一点。
 - 判据：`round-trips a small file byte-identically with its encrypted filename and mime intact`、
   `stores no plaintext file name or file bytes for an attachment`、
   `round-trips an image through the same pipeline and leaves it decryptable for a late joiner`、
