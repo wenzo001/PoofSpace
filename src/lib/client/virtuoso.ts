@@ -76,18 +76,26 @@ export function useVirtualList(keys: readonly string[], opts: VirtualOptions): V
 
   useEffect(() => {
     const ro = new ResizeObserver((entries) => {
-      let changed = false;
-      const next = new Map(heights);
-      for (const entry of entries) {
-        const key = observed.current.get(entry.target);
-        if (!key) continue;
-        const h = Math.round(entry.contentRect.height);
-        if (h > 0 && Math.abs((next.get(key) ?? 0) - h) >= 1) {
-          next.set(key, h);
-          changed = true;
+      // Functional update on purpose: this observer is created once, so reading the `heights`
+      // binding here would hand back the first render's map, and every callback would then
+      // overwrite all other rows' measurements - each wiped row drops to the estimate and the
+      // pinned bottom jumps by that difference on the next frame.
+      setHeights((prev) => {
+        let changed = false;
+        const next = new Map(prev);
+        for (const entry of entries) {
+          const key = observed.current.get(entry.target);
+          if (!key) continue;
+          // Same basis as the ref-measure callback: two writers using different box models would
+          // disagree by a few pixels on every row, forever.
+          const h = Math.round(entry.target.getBoundingClientRect().height);
+          if (h > 0 && Math.abs((next.get(key) ?? 0) - h) >= 1) {
+            next.set(key, h);
+            changed = true;
+          }
         }
-      }
-      if (changed) setHeights(next);
+        return changed ? next : prev;
+      });
     });
     roRef.current = ro;
     return () => {
