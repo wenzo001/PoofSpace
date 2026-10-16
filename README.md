@@ -22,8 +22,8 @@ project: those are exactly the things PoofSpace refuses to keep.
 | | |
 | --- | --- |
 | **Create → share** | 128-bit random room id + 256-bit secret generated **in the browser**. The secret travels only in the URL `#` fragment, which never reaches a server, and in the invite code you paste to whoever you invite. |
-| **Enter → chat** | Text messages plus arbitrary files and images, encrypted client-side before upload. Several at once: select many in the file picker, or paste a screenshot, a copied image or a copied file anywhere on the page — the clipboard's *files* are sent, its text is left to the input box. Late joiners can decrypt and read the history that is still held, and scrolling up through it keeps the row you were reading instead of pulling you back to the bottom (the one step where a whole older page lands still moves about a wheel notch: `docs/DEBT.md` D28). |
-| **Last one out → countdown** | `ACTIVE → IDLE_GRACE (300 s) → DESTROYING → DESTROYED`. Anyone holding the invite can walk back into **the same room** during the window; the countdown is cancelled, history intact. |
+| **Enter → chat** | Text messages plus arbitrary files and images, encrypted client-side before upload. One attachment control sends several at once, and **the file's own type decides how it renders** — a picture appears as a picture, anything else as a card; the same split applies to what you paste. Paste a screenshot, a copied image or a copied file anywhere on the page and every item goes; the clipboard's *text* is left to the input box. Sending takes you back to the bottom, and an inbound message only does so when you were already there. Late joiners can decrypt and read the history that is still held, and scrolling up through it keeps the row you were reading instead of pulling you back to the bottom (the one step where a whole older page lands still moves about a wheel notch: `docs/DEBT.md` D28). |
+| **Last one out → countdown** | `ACTIVE → IDLE_GRACE (300 s) → DESTROYING → DESTROYED`. Anyone holding the invite can walk back into **the same room** during the window; the countdown is cancelled, history intact. The home page lists this device's still-live rooms and says how many were connected the last time it was inside — a local snapshot, because asking over the network would mean joining, and joining would cancel the countdown. |
 | **Auto destroy** | No manual cleanup needed. Destroy removes ciphertext, attachment chunks, partial uploads, sessions and the room row itself — a destroyed room leaves **no database record at all**. |
 | **Server can't read it** | The server stores room state, random ids, ciphertext and minimal run metadata. It never receives a key, plaintext, filename, or MIME type. |
 
@@ -129,7 +129,7 @@ was deliberately broken and the gate was required to go red — and skipped chec
 passing (`SKIP` is a distinct verdict, and the strict table fails on it).
 
 Current state: **16 gates PASS / 0 FAIL / 0 SKIP** (`npm run gates`), 157 automated checks, plus a
-real-browser lane (21 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
+real-browser lane (27 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
 non-secure context, where `crypto.subtle` is absent and the bundled pure-JS AES-GCM path is used) and
 real TLS. The 100-member lane has died before printing a single assertion on roughly half of the
 full-table runs on the development machine (`0 files, 0 tests` + `ERR_IPC_CHANNEL_CLOSED`); a crashed

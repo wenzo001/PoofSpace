@@ -55,7 +55,14 @@
 要说全的一半是：`gates-J` 的 B2–B5 判的是它开跑**之前**那一包（同一份源码的上一次编译）—— 台面"先 B1 重编、再判已在盘上的包"
 这个顺序决定了这两件事不可能在同一遍里同时对同一包成立，§7.10 把这条写死了。文档不参与任何一条台面腿
 （§7.10 给了 grep 证据），所以这次同步不会把任何一条改红。
-**到这里就停手**：不再改文件、不再追读数，否则这个循环没有尽头。
+**这一版到这里收口**：不再改文件、不再追读数，否则这个循环没有尽头 —— 结果"收口"之后用户又用了一遍界面，
+第五轮就这么来了（见下面一段与 §7.11）。这条纪律不是"写完就不会再改"，而是"**每一次交付内部**不自转"：
+每次改动都以"文档 → 提交 → 打包 → 一遍台面"的固定顺序收一次口，要改就开下一轮，别在同一轮里追自己的尾巴。
+
+**第五轮（同日更晚：预览层级、一个附件入口、跳底、人数快照、弹窗文字可选中）**：浏览器线 21 → **27 条腿**，
+`scratch/lane-27b.log` = **54 行全 PASS = 27 条腿 × 两个来源，`LANE_EXIT=0`**（这一遍连 D27 那族两条抖动腿也绿了）。
+七条要求逐条的读数与五把新刀记在 **§7.11**；`anchorAt` 每次滚动 O(n) 这条 review 时发现的形状登记成 **D31**，
+没有顺手改 —— 它现在没有任何读数说明有多疼，改它得先能测出来。
 
 规范 §13 的十条验收标准与补充规范 §8 的三族验收测试都有判据覆盖；**尚未做到或只做到一部分的事全部列在
 `docs/DEBT.md`**（D15–D19 是这一轮新登记的），本报告不把它们说成已完成（§5 给了摘要）。
@@ -616,3 +623,37 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 - Word 交付物：`docs/*.docx` 不进 git（`.gitignore:25`），本机用 `node scripts/md-to-docx.mjs <文件…>` 现生成。
 - 建仓与推送仍归执行人：公开线 `git push origin main && git push origin v1.0.1`；
   公司线 `git checkout internal-deploy && git merge main && git push lc internal-deploy`（单向，main 不含公司配置）。
+
+### 7.11 第五轮：用户又把界面用了一遍（2026-10-16 晚）
+
+七条要求全部来自现场截图，不是规范。这一轮的浏览器线是 **27 条腿**（21 → 27），逐条读数与刀：
+
+| 要求 | 现场是什么问题 | 修完之后（浏览器线读数） | 刀（改回坏样子，该腿必须红） |
+| --- | --- | --- | --- |
+| 图片预览要在全图层最高 | 预览打开时，后面的文件卡与输入条照样压在它上面 | `the image preview is the top layer over the chat: portal to body=true; 中心像素命中预览=true (hit img.)，此时列表里挂着 2 行` | 把 `kind` 恒置为 `'file'`（图片不再渲染成缩略图）⇒ 该腿等不到 `.thumb`，`page.waitForSelector: Timeout 45000ms` ⇒ 红 |
+| 展开全文弹窗不要跟着内容滚 | 弹窗是**那一行**画的，行被虚拟列表搬走时它跟着搬 | `scrim on body=true, dialog inside the list=false; 列表被滚走 400px，弹窗位移 0px 垂直 / 0px 水平` | 让 `Modal` 不走 portal（原地渲染）⇒ `scrim on body=false, inside the list=true`，且**弹窗跟着动了 400px** ⇒ 红 |
+| 弹窗里的文字可以选中复制，不要一点全选 | `.full-text { user-select: all }`：点一下整篇被选中 | `one click selected 0 char(s) of 510; dragging selected 11 (< full=true)` | 改回 `all` ⇒ `one click selected 510 char(s) of 510; dragging selected 510` ⇒ 红 |
+| 附件与图片应该是一个东西 | 两颗按钮，纸夹那颗强制 `kind:'file'` ⇒ 从纸夹选的 jpg 变成文件卡（截图里那张 `20110814_…jpg 33 KB 下载`） | `attachment buttons in the composer=1; thumbnails=1 file cards=1; queue left 0`（一次选择同时给一张 png 与一个 txt） | `kind` 恒为 `'file'` ⇒ 图片不再成为缩略图，`waitForFunction` 45 s 超时 ⇒ 红 |
+| 图片消息再紧凑、风格与气泡统一 | 缩略图固定 200×140 且圆角与气泡不同源 | `thumbnail 168x112 radius 16px vs bubble 16px`（占位框与缩略图同一份声明，避免像素到达时行高再变） | 天然证人：改前 token 是 14px、精修段里又写了一遍字面量 16px ⇒ 该腿读到 `radius 14px vs bubble 16px` 就是红的 |
+| 发出新消息要滚到最底 | `scrollToBottom` 只挂在"回到底部"那颗按钮上，自己发的也不跳 | `scrolled 174px off the bottom, then sent: 0px from the bottom and the last row is on screen=true` | 删掉 `send()` 里的 `virt.scrollToBottom()` ⇒ `距底 238px，末行不在屏内` ⇒ 红 |
+| 首页历史里显示仍在运行的房间有多少人 | 只有"房间仍在进行"，不知道里面还有没有人 | `history row says "房间仍在进行 · 上次 2 人在线" after two devices were in the room` | 删掉房内写快照的那次 `vault.noteOnline(...)` ⇒ 那行退回 `"房间仍在进行"` ⇒ 红 |
+
+**口径**：人数按拍板走"**上次进房时的快照**"，不轮询、不开 socket —— 从首页连上去数人等于这台设备成了成员，
+`ACTIVE` 会把 300 秒无人销毁的倒计时取消，10 秒一次的轮询会让房间永远死不掉；而 HTTP 状态接口按既定规则
+只回答一个 bit（`src/server/http-api.ts:155`：谁在线只给成员、只走认证后的 socket）。
+
+**这一轮被腿撞出来的两个真缺陷（不是刀）**：
+
+1. `Modal` 的 effect 依赖里带着 `onClose`，而调用方传的是行内箭头函数 ⇒ 每次 render 都重跑，
+   每次都把焦点抢回弹窗。现场表现：弹窗开着时往输入框打字，Enter 落进弹窗、消息发不出去
+   （腿的读数 `bubbles: 1, modals: 1` —— 第二条根本没发出去）。改成 `onClose` 走 ref、依赖只留挂载点。
+2. 圆角"两处一个数字"：`.bubble` 基础规则读 `var(--r-bubble)`，而精修那一段又写了一遍字面量
+   `border-radius: 16px` —— 块内后面那句同名声明把它盖掉，token 改到 14px 也没人读。
+   现在 token 定 16px、覆盖段不再写圆角，判据要求"缩略图圆角与气泡圆角字符串相等"。
+
+**仪器修正**（不是产品缺陷，但必须记）：昵称那条腿在 `gotoPage` 之后**立刻** count 弹窗，
+而门是 hydration 之后一次 commit 才出现 ⇒ 整跑变重之后读到 `peer gate=0` 的假红。改成"等它出现再数
+（15 s 上限）"。同一条腿改前读数 `peer gate=0`、改后绿。
+
+台面计数：本轮之后浏览器线 **27 条腿**（`scratch/lane-27b.log`，两来源各一遍）；`gates-H/I/J` 三遍整台面的读数与
+"被认证的那次编译 vs 交付的那次打包"的口径见 §0 与 §7.10。

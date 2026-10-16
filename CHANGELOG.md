@@ -42,6 +42,24 @@ Everything here came out of using the app in a browser, not out of the specifica
   landed on nothing. Both now travel with the artifact, and the artifact audit refuses any shipped
   markdown that names a `docs/*.md` file present in the source tree but missing from the package
   (witness: dropping `docs/DEBT.md` from the list fails the audit on four pointers).
+- Full-screen furniture no longer belongs to a message row. The image preview and the 展开全文 dialog
+  were both rendered by the row that opened them, and rows carry `transform: translateY(...)` from the
+  virtual list — a transformed ancestor captures `position: fixed` and confines `z-index`, so a preview
+  with the stylesheet's highest number still lost to the composer and travelled with the list. Both now
+  portal into `<body>`: `portal to body=true` with the centre pixel resolving inside the preview while
+  list rows are mounted behind it, and `the list moved 400px while the dialog moved 0px`.
+- An open dialog no longer steals the keyboard. Its focus effect listed `onClose` — an inline arrow, so
+  a new identity every render — among its dependencies, which re-ran the focus on each re-render and
+  pulled it back into the dialog; with a long message's dialog open, typing in the composer and pressing
+  Enter sent nothing (`bubbles: 1, modals: 1`). The handler moved into a ref and the effect now depends
+  only on the portal mounting.
+- One radius per corner. `.bubble` read `var(--r-bubble)` in the base rule while the compact pass
+  restated `border-radius: 16px` after it, so the token was dead and the thumbnail — which does read
+  it — measured `14px` against the bubble's `16px`. The token is the single source now, and a leg
+  requires the two radii to be the same string.
+- The dialog's text is selected by dragging, not by a single click: `user-select: all` became `text`.
+  Witness on the broken build: `one click selected 510 char(s) of 510`; fixed: `0 char(s)` on click,
+  11 on drag.
 
 - `npm run dev` was inert: the custom server destroyed every WebSocket upgrade that was not `/ws`,
   which killed Next's dev hot-reload socket, so the page rendered but React never hydrated and every
@@ -68,7 +86,20 @@ Everything here came out of using the app in a browser, not out of the specifica
 - The per-message copy control appears on hover on pointers that have one, stays visible on touch,
   reaches a 44px band without growing the visible pill, and copies the selected text when the reader
   has selected some.
-- The home page's list of this device's still-live rooms is labelled as history.
+- The home page's list of this device's still-live rooms is labelled as history. It now also says how
+  many were connected the last time this device was inside. That number is a local snapshot on purpose:
+  asking the server would mean joining, and joining cancels the room's idle-destroy countdown — so a
+  polling "who is there now" would quietly make rooms immortal.
+- The composer has one attachment control instead of two. Which button was pressed no longer decides
+  anything: the file's own type does, so a `.jpg` picked from the paperclip renders as a picture rather
+  than as a download card, and one batch containing a picture and a document produces one of each
+  (`thumbnails=1 file cards=1`, one icon button in the composer).
+- Sending your own message returns the list to the bottom; an inbound one still only does so when you
+  were already near it, so the reading-position hold from this round is not traded away (`scrolled
+  174px off the bottom, then sent: 0px from the bottom, last row on screen`).
+- Images in the list are smaller and share the bubble's corner: `min(168px, 46vw) × 112`, with the
+  thumbnail and its placeholder declared as one box so a row does not change height at the moment the
+  pixels arrive.
 - Labels sit on their control's centre line now. Buttons and pills that had a `min-height` and
   padding but no centring box pushed their text toward the top — measured with a `Range` over each
   control's contents, the worst offset across seven controls went from 12px (the home page's
@@ -104,6 +135,19 @@ Everything here came out of using the app in a browser, not out of the specifica
   multi-file stall was named (`queue="排队中 剪贴板里的文件.txt 0/1块"`) rather than guessed at.
 - The lane boots with `MAX_ROOMS=80`: its own legs create more rooms than the shipped default of 20,
   and a capacity ceiling reached by the harness is not a product refusal.
+- Six legs joined the lane in this pass (21 → 27): the preview outranking the chat behind it, an open
+  dialog not travelling with the list, one picker splitting pictures from files, the thumbnail sharing
+  the bubble's radius, sending landing at the bottom, and the home page reporting the head count seen
+  while inside. Each was cut separately and each came back red with its own reading — including the
+  dialog leg, which on the broken build reported `the dialog moved 400px` alongside the list's 400px.
+- One instrument bug found and fixed while doing that: the nickname leg counted the peer's naming gate
+  the moment the page arrived, and the gate appears one commit after hydration. Waiting for it instead
+  of sleeping turned `peer gate=0` into a stable green — the reading that looked like a product defect
+  was the harness losing a race, and it is recorded as such rather than as a fix.
+- `npm run dev` now says what is blocking it. It used to restart a child that refused to boot once per
+  second forever, turning Next's one-line "another dev server is already running" into an unreadable
+  loop; it now reads `.next/dev/lock` before starting (clearing a lock whose PID is gone, naming the
+  process when one is alive) and stops after two exits within eight seconds of spawning.
 - The 10→16 step of that growth covered first-run naming, an uploaded image reaching the
   other device, joined rooms appearing as history, both devices landing on the home page after a
   destroy, the copy control judged on what the clipboard actually received, and the parked list
@@ -111,11 +155,11 @@ Everything here came out of using the app in a browser, not out of the specifica
 - `npm test` runs the suite in two invocations so the 100-member lane gets its own process, and the
   test bed retries a WebSocket *connect* that the operating system refused — never a `ROOM_FULL` or
   any product refusal (proved by re-refusing every join and watching the lane go red).
-- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 21 browser
-  legs. Mutation evidence per judgement — seven knives this round, each proven red at the layer the
-  harness actually boots — plus three earlier knives that came back as equivalent mutations and are
-  recorded as gaps rather than as passes, in `docs/TEST-REPORT.md` §7.7 and §7.9 and `docs/DEBT.md`
-  D21–D29.
+- Acceptance for this release: 16 gates `PASS / 0 FAIL / 0 SKIP`, 157 automated checks, 27 browser
+  legs. Mutation evidence per judgement — twelve knives across the release (seven in the fourth round,
+  five here), each proven red at the layer the harness actually boots — plus three earlier knives that
+  came back as equivalent mutations and are recorded as gaps rather than as passes, in
+  `docs/TEST-REPORT.md` §7.7, §7.9 and §7.11 and `docs/DEBT.md` D21–D31.
 
 ## 1.0.0 — 2026-10-15
 
