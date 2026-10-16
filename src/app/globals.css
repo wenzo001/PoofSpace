@@ -35,7 +35,7 @@
 
   --r-pill: 9999px;
   --r-card: 16px;
-  --r-bubble: 14px;
+  --r-bubble: 16px;
   --r-sm: 10px;
   --r-avatar: 8px;
 
@@ -881,7 +881,10 @@ a {
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  user-select: all;
+  /* `all` made a single click select the whole message, so anyone trying to copy a phrase got the
+     entire paragraph instead. Drag-selection is the normal case here; 全选并复制 is a button.
+     Knife witness: with `all` the leg reads "one click selected 510 char(s) of 510". */
+  user-select: text;
 }
 
 .msg.own {
@@ -973,23 +976,25 @@ a {
 
 /* image message */
 
+/* The thumbnail and its placeholder are one box with two owners: any difference between them
+   re-measures the row at the moment the pixels arrive, which is the jump the scroll hold then has
+   to compensate for. Sized and rounded in the bubble's language rather than a box of its own. */
+.thumb,
+.thumb-placeholder {
+  width: min(168px, 46vw);
+  height: 112px;
+  border-radius: var(--r-bubble);
+  border: 1px solid var(--line);
+  background: var(--card-2);
+}
+
 .thumb {
   display: block;
-  border-radius: var(--r-sm);
-  background: var(--card-2);
-  border: 1px solid var(--line);
   object-fit: cover;
-  width: 200px;
-  height: 140px;
   cursor: zoom-in;
 }
 
 .thumb-placeholder {
-  width: 200px;
-  height: 140px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--line);
-  background: var(--card-2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1392,7 +1397,8 @@ a {
 
 .bubble {
   padding: 5px 10px;
-  border-radius: 16px;
+  /* no border-radius here: the base rule reads var(--r-bubble), and a second literal in this block
+     would silently win — which is how the thumbnail's token radius stopped matching the bubble's */
   line-height: 1.4;
   letter-spacing: -0.005em;
 }

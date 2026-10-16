@@ -21,7 +21,7 @@ interface Row {
 }
 
 function toRows(entries: VaultEntry[]): Row[] {
-  return entries.map((e) => ({ roomId: e.roomId, state: 'checking' as RowState, online: 0 }));
+  return entries.map((e) => ({ roomId: e.roomId, state: 'checking' as RowState, online: e.lastOnline ?? 0 }));
 }
 
 export default function HomeView() {
@@ -162,7 +162,10 @@ export default function HomeView() {
               <div className="vault-item" key={row.roomId}>
                 <div className="col">
                   <span className="rid">#{row.roomId}</span>
-                  <span className="when">{row.state === 'checking' ? '校验中…' : row.state === 'unknown' ? '暂时无法校验' : '房间仍在进行'}</span>
+                  <span className="when">
+                    {row.state === 'checking' ? '校验中…' : row.state === 'unknown' ? '暂时无法校验' : '房间仍在进行'}
+                    {row.state === 'active' && row.online > 0 ? ` · 上次 ${row.online} 人在线` : ''}
+                  </span>
                 </div>
                 {row.state === 'active' ? (
                   <a className="link-btn" href={`/room/${row.roomId}`}>

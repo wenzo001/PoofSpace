@@ -7,6 +7,9 @@ export interface VaultEntry {
   /** Base64url invite secret: the minimum credential needed to re-enter the room. */
   secret: string;
   creatorToken?: string;
+  /** Online count the last time this device was inside. A snapshot, never a live figure: reading
+   *  it must not cost a join, because joining would cancel the room's idle-destroy countdown. */
+  lastOnline?: number;
   savedAt: number;
   lastUsed: number;
 }
@@ -29,6 +32,7 @@ function toEntry(raw: unknown): VaultEntry | null {
       roomId: encodeRoomId(decodeRoomId(o.roomId)),
       secret: encodeSecret(decodeSecret(o.secret)),
       creatorToken: typeof o.creatorToken === 'string' ? o.creatorToken : undefined,
+      lastOnline: typeof o.lastOnline === 'number' && o.lastOnline >= 0 ? o.lastOnline : undefined,
       savedAt: typeof o.savedAt === 'number' ? o.savedAt : Date.now(),
       lastUsed: typeof o.lastUsed === 'number' ? o.lastUsed : Date.now()
     };
@@ -111,5 +115,20 @@ export function touch(roomId: string): void {
   const hit = entries.find((e) => e.roomId === roomId);
   if (!hit) return;
   hit.lastUsed = Date.now();
+  persist(entries);
+}
+
+/**
+ * Records how many members were connected the last time this device was inside, so the home page
+ * can say something true about a room without opening a socket to ask — asking would join, and
+ * joining would cancel the room's idle-destroy countdown.
+ */
+export function noteOnline(roomId: string, online: number): void {
+  const id = normalizeRoomId(roomId);
+  if (!id || !Number.isFinite(online) || online < 0) return;
+  const entries = list();
+  const hit = entries.find((e) => e.roomId === id);
+  if (!hit) return;
+  hit.lastOnline = Math.floor(online);
   persist(entries);
 }

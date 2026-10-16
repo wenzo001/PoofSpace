@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Avatar from '@/components/Avatar';
-import Modal from '@/components/Modal';
+import Modal, { Overlay } from '@/components/Modal';
 import NicknameDialog from '@/components/NicknameDialog';
 import {
   BellIcon,
   CloseIcon,
   DownloadIcon,
   FileIcon,
-  ImageIcon,
   LockIcon,
   PaperclipIcon,
   WarnIcon
@@ -112,11 +111,16 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const getSnapshot = useMemo(() => () => (sess ? sess.store.getSnapshot() : EMPTY_SNAPSHOT), [sess]);
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
+  // The home page shows this number later, so it has to be captured while inside. Polling it from
+  // there would mean joining, and joining cancels the room's idle-destroy countdown.
+  useEffect(() => {
+    if (roomIdProp && snap.online > 0) vault.noteOnline(roomIdProp, snap.online);
+  }, [roomIdProp, snap.online]);
+
   const keys = useMemo(() => snap.messages.map((m) => m.id), [snap.messages]);
   const virt = useVirtualList(keys, { estimate: ROW_ESTIMATE });
 
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const imageInput = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const acceptedRef = useRef(false);
   const busyLoad = useRef(false);
@@ -288,7 +292,10 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     });
   }, [sess]);
 
-  const enqueue = (files: FileList | File[] | null, kind: 'file' | 'image') => {
+  // One entry point, and the file itself decides how it renders: an image is an image whether it
+  // came from the picker or from the clipboard, so `kind` is derived here instead of being passed
+  // in by whichever button happened to be pressed.
+  const enqueue = (files: FileList | File[] | null) => {
     if (!files || files.length === 0) return;
     const next: UploadJob[] = [];
     for (const file of Array.from(files)) {
@@ -296,6 +303,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
         sess?.store.setNotice(`附件超过 ${formatBytes(LIMITS.attachmentBytesMax)} 上限`);
         continue;
       }
+      const kind: UploadJob['kind'] = file.type.startsWith('image/') ? 'image' : 'file';
       next.push({
         key: `${kind}-${file.name}-${file.size}-${Math.random().toString(36).slice(2, 8)}`,
         name: file.name,
@@ -338,8 +346,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
           lastModified: f.lastModified || Date.now()
         });
       });
-      enqueue(named.filter((f) => f.type.startsWith('image/')), 'image');
-      enqueue(named.filter((f) => !f.type.startsWith('image/')), 'file');
+      enqueue(named);
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
@@ -362,6 +369,9 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
       return;
     }
     setDraft('');
+    // Sending is the reader's own action, so the list follows it unconditionally — unlike an
+    // inbound message, which only pins when they were already near the bottom.
+    virt.scrollToBottom();
     try {
       await client.sendText(body);
     } catch (err) {
@@ -566,21 +576,10 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
       ) : null}
 
       <div className="composer">
-        <button type="button" className="icon-btn" aria-label="发送文件" onClick={() => fileInput.current?.click()}>
+        <button type="button" className="icon-btn" aria-label="添加文件" onClick={() => fileInput.current?.click()}>
           <PaperclipIcon />
         </button>
-        <button type="button" className="icon-btn" aria-label="发送图片" onClick={() => imageInput.current?.click()}>
-          <ImageIcon />
-        </button>
-        <input ref={fileInput} type="file" hidden multiple onChange={(e) => { enqueue(e.target.files, 'file'); e.target.value = ''; }} />
-        <input
-          ref={imageInput}
-          type="file"
-          hidden
-          multiple
-          accept="image/*"
-          onChange={(e) => { enqueue(e.target.files, 'image'); e.target.value = ''; }}
-        />
+        <input ref={fileInput} type="file" hidden multiple onChange={(e) => { enqueue(e.target.files); e.target.value = ''; }} />
         <div className="input-field">
           <textarea
             ref={composerRef}
@@ -928,12 +927,14 @@ function ImageBody({
         }}
       />
       {zoom ? (
-        <div className="lightbox" onClick={() => { dropFull(id); setZoom(null); }}>
-          <img src={zoom} alt="" />
-          <button type="button" className="icon-btn" aria-label="关闭预览">
-            <CloseIcon />
-          </button>
-        </div>
+        <Overlay>
+          <div className="lightbox" onClick={() => { dropFull(id); setZoom(null); }}>
+            <img src={zoom} alt="" />
+            <button type="button" className="icon-btn" aria-label="关闭预览">
+              <CloseIcon />
+            </button>
+          </div>
+        </Overlay>
       ) : null}
     </>
   );
