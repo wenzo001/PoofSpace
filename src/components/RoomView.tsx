@@ -799,7 +799,7 @@ function MessageRow({
       {msg.own ? null : <Avatar nick={msg.senderNick || NICK_FALLBACK} small />}
       <div className="col">
         {msg.own ? null : <span className="author truncate">{msg.senderNick || NICK_FALLBACK}</span>}
-        <div className="bubble">
+        <div className={msg.kind === 'image' ? 'bubble bubble-image' : 'bubble'}>
           {msg.kind === 'text' ? (
             <>
               <p className="text-block" ref={bodyRef}>{body}</p>

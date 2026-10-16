@@ -1982,14 +1982,65 @@ async function onePickerSplitsPicturesFromFiles(browser, origin, emit) {
       g.cards === 1 &&
       g.w <= 170 &&
       g.h <= 114 &&
-      g.radius === g.bubbleRadius &&
+      // Re-pointed, not dropped: this term used to read `thumbnail radius === bubble radius`, which
+      // caught a token going dead under a literal. The frame has one owner now, so agreement is no
+      // longer between two strokes — it is that only the bubble draws one. Same defect family, the
+      // reading that has to change is "which node owns the corner".
+      g.radius === '0px' &&
+      g.bubbleRadius === '16px' &&
       g.queue === 0;
     record(
       'one picker renders pictures as pictures and files as cards',
       ok ? 'PASS' : 'FAIL',
-      `attachment buttons in the composer=${g.buttons}; thumbnails=${g.thumbs} file cards=${g.cards}; thumbnail ${g.w}x${g.h} radius ${g.radius} vs bubble ${g.bubbleRadius}; queue left ${g.queue}; room ${roomId.slice(0, 6)}`
+      `attachment buttons in the composer=${g.buttons}; thumbnails=${g.thumbs} file cards=${g.cards}; thumbnail ${g.w}x${g.h} carries no radius (${g.radius}) while the bubble carries 16px (${g.bubbleRadius}); queue left ${g.queue}; room ${roomId.slice(0, 6)}`
     );
     emit(`${ok ? 'PASS' : 'FAIL'} one file control, and the file's own type decides how it renders`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+async function imageBubbleIsTheImageItself(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page
+      .locator('.composer input[type=file]')
+      .first()
+      .setInputFiles([{ name: '一张图.png', mimeType: 'image/png', buffer: await solidPng(a.page, '#36c') }]);
+    await a.page.waitForFunction(() => document.querySelectorAll('.msg.own img.thumb').length === 1, null, { timeout: 45000 });
+    await new Promise((r) => setTimeout(r, 600));
+    // Measured at two widths on purpose: `@media (max-width: 390px)` restates `.bubble` padding, so
+    // a frame fix that only holds on a desktop window is the same bug on a phone.
+    const read = async () =>
+      a.page.evaluate(() => {
+        const thumb = document.querySelector('.msg.own img.thumb');
+        const bubble = thumb.closest('.bubble');
+        const tb = thumb.getBoundingClientRect();
+        const bb = bubble.getBoundingClientRect();
+        const bs = getComputedStyle(bubble);
+        const ts = getComputedStyle(thumb);
+        return {
+          dw: Math.round(bb.width - tb.width),
+          dh: Math.round(bb.height - tb.height),
+          pad: `${bs.paddingTop}/${bs.paddingRight}/${bs.paddingBottom}/${bs.paddingLeft}`,
+          strokes: (parseFloat(bs.borderTopWidth) > 0 ? 1 : 0) + (parseFloat(ts.borderTopWidth) > 0 ? 1 : 0),
+          radius: bs.borderTopLeftRadius,
+          clipped: bs.overflowHidden || bs.overflow === 'hidden'
+        };
+      });
+    const wide = await read();
+    await a.page.setViewportSize({ width: 390, height: 800 });
+    await new Promise((r) => setTimeout(r, 400));
+    const phone = await read();
+    const ok = [wide, phone].every((m) => m.dw <= 2 && m.dh <= 2 && m.pad === '0px/0px/0px/0px' && m.strokes === 1 && m.clipped);
+    record(
+      'an image message has one frame, at both widths',
+      ok ? 'PASS' : 'FAIL',
+      `wide: bubble−thumbnail = ${wide.dw}x${wide.dh}px, bubble padding ${wide.pad}, strokes ${wide.strokes}, radius ${wide.radius}, clipped ${wide.clipped}; at 390px: ${phone.dw}x${phone.dh}px, padding ${phone.pad}, strokes ${phone.strokes}, clipped ${phone.clipped}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the picture is the bubble, not a picture mounted in one`);
   } finally {
     await a.context.close();
   }
@@ -2342,6 +2393,7 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['the image preview is the top layer over the chat', () => imagePreviewIsTheTopLayer(browser, httpOrigin, emit)],
           ['an open dialog does not travel with the list behind it', () => dialogStaysPutWhileTheListMoves(browser, httpOrigin, emit)],
           ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
+          ['an image message has one frame, at both widths', () => imageBubbleIsTheImageItself(browser, httpOrigin, emit)],
           ['sending a message lands at the bottom', () => sendingLandsAtTheBottom(browser, httpOrigin, emit)],
           ['the dialog text is drag-selected, not select-all on click', () => dialogTextIsDragSelectable(browser, httpOrigin, emit)],
           ['the home page reports the head count seen while inside', () => homeReportsTheLastHeadCount(browser, httpOrigin, emit)],

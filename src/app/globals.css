@@ -1003,6 +1003,23 @@ a {
   font-size: var(--fs-sm);
 }
 
+/* An image is the bubble, not a picture mounted inside one. Measured before this rule: the bubble
+   was 190×124 and the thumbnail 168×112, each with its own 1px stroke and its own 16px radius,
+   10px/5px apart — a mat, and the only message kind whose frame had two owners. The compound
+   selector is deliberate: `@media (max-width: 390px)` restates `.bubble` padding further down the
+   file, and a same-specificity rule there would silently win on phones. */
+.bubble.bubble-image {
+  padding: 0;
+  background: none;
+  overflow: hidden;
+}
+
+.bubble.bubble-image .thumb,
+.bubble.bubble-image .thumb-placeholder {
+  border: 0;
+  border-radius: 0;
+}
+
 .lightbox {
   position: fixed;
   inset: 0;
