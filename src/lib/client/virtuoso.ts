@@ -8,9 +8,16 @@ export interface VirtualOptions {
   bottomThresholdPx?: number;
 }
 
+/**
+ * The row the reader is looking at, and the two numbers needed to keep it there:
+ * `dy` is how far the viewport top sits below that row's own top edge (a row-relative quantity,
+ * so it survives every re-measurement), and `at` is the scroll position the hold was taken at,
+ * which is what separates "the reader moved" from "the content moved underneath them".
+ */
 export interface Anchor {
   key: string;
-  offset: number;
+  dy: number;
+  at: number;
 }
 
 export interface VirtualList {
@@ -47,8 +54,29 @@ export function useVirtualList(keys: readonly string[], opts: VirtualOptions): V
   const roRef = useRef<ResizeObserver | null>(null);
   const pinnedRef = useRef(true);
   const anchorRef = useRef<Anchor | null>(null);
-  const restoreRef = useRef<{ key: string; offset: number } | null>(null);
+  // Rows above the viewport mount at the estimate and are measured a frame later, and a page of
+  // older history lands as thousands of pixels added overhead. Without holding the row the reader
+  // is looking at, every one of those changes pushes the list down under them - which reads as
+  // "scrolling up bounces the canvas back down" and makes upward scrolling fight the finger.
+  const viewAnchorRef = useRef<Anchor | null>(null);
+  const offsetsRef = useRef<number[]>([]);
+  const keysRef = useRef<readonly string[]>([]);
   const [nearBottom, setNearBottom] = useState(true);
+
+  const anchorAt = (top: number): Anchor | null => {
+    const ks = keysRef.current;
+    const offs = offsetsRef.current;
+    if (ks.length === 0) return null;
+    let index = ks.length - 1;
+    for (let i = 0; i < ks.length; i++) {
+      if ((offs[i + 1] ?? 0) > top) {
+        index = i;
+        break;
+      }
+    }
+    const key = ks[index];
+    return key ? { key, dy: top - (offs[index] ?? 0), at: top } : null;
+  };
 
   const setScrollElement = useCallback((next: HTMLDivElement | null) => {
     elRef.current = next;
@@ -63,6 +91,10 @@ export function useVirtualList(keys: readonly string[], opts: VirtualOptions): V
       const atBottom = distance <= bottomThreshold;
       pinnedRef.current = atBottom;
       setNearBottom(atBottom);
+      // The reader moved, so the row they landed on becomes the reference point. Capturing it here
+      // (rather than in the layout pass) is what keeps the correction from fighting a real scroll:
+      // by the time heights change underneath it, `want` equals where the reader put the page.
+      viewAnchorRef.current = atBottom ? null : anchorAt(el.scrollTop);
     };
     onScroll();
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -180,47 +212,49 @@ export function useVirtualList(keys: readonly string[], opts: VirtualOptions): V
   const captureAnchor = useCallback(() => {
     const node = elRef.current;
     if (!node || keys.length === 0) return;
-    const top = scrollTop;
-    let index = 0;
-    for (let i = 0; i < keys.length; i++) {
-      if ((offsets[i + 1] ?? 0) > top) {
-        index = i;
-        break;
-      }
-      index = i;
-    }
-    anchorRef.current = { key: keys[index] as string, offset: top - (offsets[index] ?? 0) };
-  }, [keys, offsets, scrollTop]);
+    // Read where the reader actually is, not where React's state said a frame ago. The gesture and
+    // the history fetch land in the same tick, so a lagged scrollTop becomes an offset error, and
+    // the restore then puts the page exactly one wheel-step away from where the reader left it.
+    anchorRef.current = anchorAt(node.scrollTop);
+  }, [keys]);
 
-  /** Called after a page of history was prepended: the anchor row is put back in place. */
+  /**
+   * Called after a page of history was prepended: the hold taken before the fetch becomes the live
+   * one, so the row the reader was on is the row the layout pass puts back in place.
+   */
   const onContentGrowth = useCallback(() => {
     const a = anchorRef.current;
-    if (!a) return;
-    const index = keys.indexOf(a.key);
-    if (index < 0) {
-      anchorRef.current = null;
-      return;
-    }
-    restoreRef.current = { key: a.key, offset: a.offset };
     anchorRef.current = null;
+    if (a && keys.indexOf(a.key) >= 0) viewAnchorRef.current = a;
   }, [keys]);
+
+  useLayoutEffect(() => {
+    offsetsRef.current = offsets as number[];
+    keysRef.current = keys;
+  });
 
   useLayoutEffect(() => {
     const node = elRef.current;
     if (!node) return;
-    const restore = restoreRef.current;
-    if (restore) {
-      const index = keys.indexOf(restore.key);
-      if (index >= 0) {
-        node.scrollTop = (offsets[index] ?? 0) + restore.offset;
-        setScrollTop(node.scrollTop);
-      }
-      restoreRef.current = null;
+    if (pinnedRef.current) {
+      if (keys.length > 0) node.scrollTop = node.scrollHeight;
+      viewAnchorRef.current = null;
       return;
     }
-    if (pinnedRef.current && keys.length > 0) {
-      node.scrollTop = node.scrollHeight;
+    const a = viewAnchorRef.current;
+    const index = a ? keys.indexOf(a.key) : -1;
+    if (!a || index < 0) {
+      viewAnchorRef.current = anchorAt(node.scrollTop);
+      return;
     }
+    // The reader's own movement since the hold was taken is added back, so this pass compensates
+    // content that shifted under them without cancelling a gesture that landed first: a row whose
+    // measurement arrived late, a page of older history, and a wheel turn are three different
+    // things, and only the first two are the list's to correct.
+    const want = (offsets[index] ?? 0) + a.dy + (node.scrollTop - a.at);
+    if (Math.abs(node.scrollTop - want) >= 1) node.scrollTop = want;
+    viewAnchorRef.current = { key: a.key, dy: a.dy, at: node.scrollTop };
+    setScrollTop(node.scrollTop);
   }, [offsets, totalHeight, keys, start, end]);
 
   useEffect(() => {

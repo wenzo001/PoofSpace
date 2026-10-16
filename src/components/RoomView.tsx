@@ -27,8 +27,8 @@ import { canonicalRoomId, clientOptions, credentialsFromClient, secretFromFragme
 import { wipe } from '@/lib/crypto/engine';
 import { useVirtualList } from '@/lib/client/virtuoso';
 
-const EXCERPT_CHARS = 280;
-const EXCERPT_LINES = 10;
+const EXCERPT_CHARS = 180;
+const EXCERPT_LINES = 6;
 const ROW_ESTIMATE = 84;
 
 const EMPTY_SNAPSHOT: RoomSnapshot = {
@@ -262,13 +262,18 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     };
     client
       .upload({ name: job.name, mime: job.file.type || 'application/octet-stream', size: job.file.size, kind: job.kind, slice })
-      .then(() => setJobs((prev) => prev.filter((j) => j.key !== job.key)))
-      .catch((err: Error) =>
-        setJobs((prev) => prev.map((j) => (j.key === job.key ? { ...j, state: 'failed', error: err.message } : j)))
-      )
-      .finally(() => {
+      .then(() => {
+        // Released before the state update, never in a finally(): React flushes this render on a
+        // microtask queued while the promise chain is still running, so a later release would let
+        // the effect re-run against a held lock. The rest of the queue then waits forever.
         activeUpload.current = false;
         currentUploadKey.current = null;
+        setJobs((prev) => prev.filter((j) => j.key !== job.key));
+      })
+      .catch((err: Error) => {
+        activeUpload.current = false;
+        currentUploadKey.current = null;
+        setJobs((prev) => prev.map((j) => (j.key === job.key ? { ...j, state: 'failed', error: err.message } : j)));
       });
   }, [jobs, sess]);
 
@@ -283,7 +288,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     });
   }, [sess]);
 
-  const enqueue = (files: FileList | null, kind: 'file' | 'image') => {
+  const enqueue = (files: FileList | File[] | null, kind: 'file' | 'image') => {
     if (!files || files.length === 0) return;
     const next: UploadJob[] = [];
     for (const file of Array.from(files)) {
@@ -304,6 +309,42 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
     }
     if (next.length) setJobs((prev) => [...prev, ...next]);
   };
+
+  // Ctrl/Cmd+V anywhere on the page sends what the clipboard actually holds: a screenshot, an
+  // image copied from another app, a file copied in Explorer/Finder. Text is left to the browser
+  // so pasting into the input box keeps working exactly as it did. Every item on the clipboard is
+  // taken, so copying several files queues them all.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const data = e.clipboardData;
+      if (!data) return;
+      const files: File[] = [];
+      // Indexed walk rather than a spread: `DataTransferItemList` is array-like, and reading it by
+      // index is the one form every engine implements.
+      for (let i = 0; i < data.items.length; i++) {
+        const item = data.items[i];
+        const f = item && item.kind === 'file' ? item.getAsFile() : null;
+        if (f) files.push(f);
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+      const named = files.map((f, i) => {
+        const unnamed = !f.name || f.name === 'image.png' || f.name === 'blob';
+        if (!unnamed) return f;
+        const ext = (f.type.split('/')[1] || 'bin').split(';')[0];
+        return new File([f], `${f.type.startsWith('image/') ? '粘贴图片' : '粘贴文件'}-${stamp}${files.length > 1 ? `-${i + 1}` : ''}.${ext}`, {
+          type: f.type || 'application/octet-stream',
+          lastModified: f.lastModified || Date.now()
+        });
+      });
+      enqueue(named.filter((f) => f.type.startsWith('image/')), 'image');
+      enqueue(named.filter((f) => !f.type.startsWith('image/')), 'file');
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sess]);
 
   // -------------------------------------------------------------------- send
   const send = async () => {
@@ -504,7 +545,8 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
         <div className="queue">
           {jobs.map((j) => (
             <span className="pill ghost" key={j.key}>
-              {j.state === 'failed' ? '失败' : '上传中'} {j.name} {j.total > 0 ? `${Math.min(j.sent, j.total)}/${j.total}` : ''}
+              {j.state === 'failed' ? '失败' : j.state === 'queued' ? '排队中' : '上传中'} {j.name}{' '}
+              {j.total > 0 ? `${Math.min(j.sent, j.total)}/${j.total}` : ''}
               {j.state === 'failed' ? (
                 <button
                   type="button"
@@ -733,7 +775,10 @@ function MessageRow({
 }) {
   const [full, setFull] = useState(false);
   const long = isLongText(msg.text);
-  const body = long && !full ? excerpt(msg.text) : msg.text;
+  // The bubble keeps its excerpt while the dialog is open: expanding inline as well changed the
+  // row's height under the reader, which re-windowed the list, unmounted the row - and took the
+  // dialog with it, because the dialog is rendered by this row.
+  const body = long ? excerpt(msg.text) : msg.text;
   const bodyRef = useRef<HTMLParagraphElement | null>(null);
 
   // A selection inside this bubble is what the reader marked, so it wins; with no selection
@@ -760,7 +805,7 @@ function MessageRow({
             <>
               <p className="text-block" ref={bodyRef}>{body}</p>
               {long ? (
-                <button type="button" className="expand" onClick={() => setFull(true)}>
+                <button type="button" className="expand" onClick={() => setFull(!full)}>
                   {full ? '收起' : '展开全文'}
                 </button>
               ) : null}
@@ -797,7 +842,11 @@ function MessageRow({
       </div>
       {full ? (
         <Modal title="完整消息" wide onClose={() => setFull(false)}>
-          <p className="full-text">{msg.text}</p>
+          {/* The text scrolls inside its own region: when a long message pushed the whole dialog,
+              the two buttons ended up below the fold and the reader had to hunt for 关闭. */}
+          <div className="scroll-box">
+            <p className="full-text">{msg.text}</p>
+          </div>
           <div className="row2">
             <button type="button" className="btn btn-ghost" onClick={() => setFull(false)}>
               关闭

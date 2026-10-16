@@ -105,8 +105,10 @@ a {
 }
 
 :focus-visible {
-  outline: 2px solid var(--teal);
-  outline-offset: 2px;
+  /* Full-contrast teal, but thin and hugging: this is the keyboard user's only indicator, so it
+     must clear 3:1 against the background - what can give is the weight, not the colour. */
+  outline: 1.5px solid var(--teal);
+  outline-offset: 1px;
 }
 
 .mono {
@@ -744,6 +746,11 @@ a {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  /* One executor of the scroll position, on purpose. The browser's own anchoring also holds the
+     page when rows above change height; the list holds it too. Two owners of the same number
+     disagree by exactly the amount the other one moved, and the reader feels that as a canvas
+     that springs back down while they scroll up. */
+  overflow-anchor: none;
 }
 
 .sizer {
@@ -945,13 +952,14 @@ a {
   }
 }
 
-/* 28px visible pill + 8px on each side is a 44px band, and the band belongs to the button
-   itself, so a tap inside it is a click on this control. */
+/* The 44px band is paid for above, never below: a following row is painted on top of this one, so
+   a band that reached down would be a hit area the reader cannot actually press. Upwards the band
+   stays inside this message's own row. 22px + 22px tall, 38px + 6px wide. */
 @media (pointer: coarse) {
   .tail .copy-msg::before {
     content: '';
     position: absolute;
-    inset: -8px;
+    inset: -22px -3px 0 -3px;
   }
 }
 
@@ -1296,4 +1304,171 @@ a {
   color: var(--body);
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill);
+}
+
+/* ============================================================ 2026-10-16 精修
+   这一节全部是"用眼睛看出来的"缺陷，每条都配了浏览器判据（见 docs/TEST-REPORT.md §2）。
+   注释里写清为什么，免得下次有人把它当成随手美化改回去。 */
+
+/* 图标此前在整个样式表里没有任何尺寸规则（grep 'svg' 命中 0）：放在固定尺寸的按钮里靠父容器
+   侥幸成立，放进 .file 这种 flex 行就会吃掉整行宽度（实测 329×329，文字列宽 0，"413 B" 竖排）。 */
+.icon {
+  flex: none;
+}
+
+.file .icon {
+  width: 32px;
+  height: 32px;
+  color: var(--mute);
+}
+
+.file .copy {
+  flex: none;
+}
+
+/* 按钮里的字此前按行盒基线排：给了 min-height 与 padding，却没有居中盒，
+   于是"下载 / 发送 / 恢复进入 / 展开全文"都看着偏低。 */
+.pill,
+.copy,
+.send,
+.expand,
+.link-btn,
+.retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* 头像里的汉字用等宽族会偏左下；网格居中 + 正文族 + line-height:1 才在方块正中。 */
+.av {
+  display: grid;
+  place-items: center;
+  font-family: var(--sans);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.me {
+  padding: 3px 12px 3px 3px;
+}
+
+.me .name,
+.msg .author {
+  line-height: 1;
+}
+
+/* 复制键从描边药丸降成一条灰字：它每行都在，越显眼越像噪声。命中区仍然 ≥44（见 .tail .copy-msg::before）。 */
+.tail .copy-msg {
+  min-height: 22px;
+  padding: 0 var(--s-2);
+  border-color: transparent;
+  color: var(--mute);
+  font-size: var(--fs-xs);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.copy-msg:hover {
+  color: var(--body);
+  background: var(--hover);
+}
+
+/* 长文本弹窗：文字在自己的盒子里滚，两个按钮不再被顶到折叠线以下。 */
+.scroll-box {
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  max-height: min(56vh, 420px);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--card-2);
+}
+
+/* 更紧凑、更原生：发丝分隔 + 半透明工具条 + 按下回弹，都是 macOS / iOS 的读感。 */
+.msg {
+  padding: 2px 0;
+}
+
+.bubble {
+  padding: 5px 10px;
+  border-radius: 16px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+
+.msg .av {
+  width: 26px;
+  height: 26px;
+  font-size: var(--fs-sm);
+}
+
+.tail {
+  margin-top: 2px;
+  gap: 6px;
+}
+
+.tail .time {
+  font-variant-numeric: tabular-nums;
+}
+
+.room-head,
+.composer {
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+.room-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.composer {
+  border-top: 1px solid var(--line);
+  padding: var(--s-2) var(--s-3);
+  gap: var(--s-1);
+}
+
+.btn:active,
+.pill:active,
+.send:active,
+.copy:active,
+.icon-btn:active,
+.expand:active {
+  transform: scale(0.97);
+}
+
+.btn,
+.pill,
+.send,
+.copy,
+.icon-btn,
+.expand {
+  transition: transform 0.12s ease, background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 覆盖式细滚动条（macOS 的读法）：不占版面，也不给一条粗轨道。 */
+.list::-webkit-scrollbar,
+.scroll-box::-webkit-scrollbar {
+  width: 10px;
+}
+
+.list::-webkit-scrollbar-thumb,
+.scroll-box::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-pill);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.list::-webkit-scrollbar-thumb:hover,
+.scroll-box::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+  background-clip: content-box;
+}
+
+.list::-webkit-scrollbar-track,
+.scroll-box::-webkit-scrollbar-track {
+  background: transparent;
 }
