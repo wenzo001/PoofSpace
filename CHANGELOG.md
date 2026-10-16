@@ -36,6 +36,12 @@ Everything here came out of using the app in a browser, not out of the specifica
   unmounted the row, and the dialog was rendered by that row — so opening it destroyed it. The bubble
   keeps its excerpt; the dialog does the reading, and it now scrolls inside its own box with both
   buttons reachable (`modal 559px in a 720px viewport; scrolled to end=true`).
+- The deployment package no longer points at documentation it does not carry. `README.md`,
+  `README.zh-CN.md`, `CHANGELOG.md` and `docs/TEST-REPORT.md` all name `docs/DEBT.md`, and the README
+  names `docs/ARCHITECTURE.md`, while neither was in the shipped set — a reader following the pointer
+  landed on nothing. Both now travel with the artifact, and the artifact audit refuses any shipped
+  markdown that names a `docs/*.md` file present in the source tree but missing from the package
+  (witness: dropping `docs/DEBT.md` from the list fails the audit on four pointers).
 
 - `npm run dev` was inert: the custom server destroyed every WebSocket upgrade that was not `/ws`,
   which killed Next's dev hot-reload socket, so the page rendered but React never hydrated and every

@@ -70,7 +70,9 @@ const SHIPPED_DOCS = [
   'CHANGELOG.md',
   'docs/DEPLOYMENT.md',
   'docs/SECURITY.md',
-  'docs/TEST-REPORT.md'
+  'docs/TEST-REPORT.md',
+  'docs/ARCHITECTURE.md',
+  'docs/DEBT.md'
 ];
 const REQUIRED_DOCS = ['LICENSE', 'README.md', 'docs/DEPLOYMENT.md'];
 
@@ -341,6 +343,23 @@ function audit(closure, copied) {
   for (const need of REQUIRED_DOCS) {
     if (!fs.existsSync(path.join(stageOut, need))) problems.push(`${need} is not shipped with the artifact`);
   }
+  // Every doc the shipped prose points at must travel with it, or the reader following the pointer
+  // lands on nothing. A mention of a path that is not on this branch (the company deployment doc,
+  // named in a sentence about what the public line excludes) is prose, not a pointer, so it is only
+  // required when the source tree actually has the file.
+  const dangling = new Set();
+  for (const rel of SHIPPED_DOCS.filter((d) => d.endsWith('.md'))) {
+    const staged = path.join(stageOut, rel);
+    if (!fs.existsSync(staged)) continue;
+    for (const m of fs.readFileSync(staged, 'utf8').matchAll(/docs\/([A-Za-z0-9._-]+\.md)/g)) {
+      const target = `docs/${m[1]}`;
+      if (target === rel) continue;
+      if (!fs.existsSync(path.join(root, target))) continue;
+      if (!fs.existsSync(path.join(stageOut, target))) dangling.add(`${rel} points at ${target}, which is not in the artifact`);
+    }
+  }
+  for (const d of dangling) problems.push(d);
+  if (!dangling.size) process.stdout.write(`doc references: closed over ${SHIPPED_DOCS.filter((d) => d.endsWith('.md')).length} shipped markdown files\n`);
   const shippedData = ['data', 'poofspace.sqlite'].filter((d) => fs.existsSync(path.join(stageOut, d)));
   if (shippedData.length) problems.push(`runtime data would be shipped: ${shippedData.join(', ')}`);
   else process.stdout.write('runtime data: none shipped (DATA_DIR must point at persistent disk)\n');

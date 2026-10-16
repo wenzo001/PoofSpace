@@ -561,12 +561,24 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 
 - 判定：`scratch/gates-G.log` = **16 PASS / 0 FAIL / 0 SKIP**，`GATES_EXIT=0`。同一棵树的另外四遍台面
   （`gates-C/D/E/F`）读数是 16/0/0、15/1、15/1、15/1，红的都是 T4 崩，见 §0 与 D26。
-- **被认证的那次编译**：`release/build-info.json` 的 `builtAt=2026-10-16T07:08:20.316Z`、
-  `nextBuildId=862nnXfdWsmXov2g7JrSB`、`abi=137`。台面 B1 那一腿自己重建 `.next/` 与 `dist/`，
-  随后的打包复用的正是它 ⇒ 被认证的那次编译就是交付包里的代码字节。
-- **交付的那次打包**：最后还会用 `npm run release -- --no-build` 再走一次，只为把 §7.9/§7.10 的文档文字
-  拷进包里。那一步会改写 `builtAt` 与 tar 包字节数 —— 所以这两个读数**不在这里钉死**，按 §7.6 末的口径分开说：
-  代码树与编译产物同上，只多几页文档。
+- **被认证的那次编译**：台面 B1 那一腿在 15:29 重建了 `dist/` 与 `.next/`（`.next/BUILD_ID=tl6vFQcpRtsH_IQY5mvaC`，
+  `abi=137`），T1–T6 跑的就是这一份。而 **15:07 打的那一包**（`release-E.log`）封的是上一次编译
+  `nextBuildId=862nnXfdWsmXov2g7JrSB` —— 同一份源码（`find src -type f -newer .next/BUILD_ID` 打空：最新的源文件是 14:49 的
+  `RoomView.tsx`），只差 Next 每次编译随机生成的 BUILD_ID。**这一条是我在这次收尾里发现的，不是当时就知道的**：
+  台面自己的顺序就是"B1 先重建、B2–B5 再判已在盘上的那一包"，所以同一遍台面里这两个来源本来就可能不是同一次编译。
+- **交付的那次打包**：`node scripts/build-release.mjs --no-build` 复用上面那次 15:29 的编译，把 §7.9/§7.10 的文档文字
+  拷进包里，于是包里的代码字节 = 被 T1–T6 判过的那一份。这一步会改写 `builtAt` 与 tar 包字节数 —— 这两个读数
+  **不在这里钉死**（它们会被下一次重打包改掉），按 §7.6 末的口径分开说。`--no-build` 自带前置断言：源码比产物新就死。
+- **包里指向的文档必须也在包里**（这次收尾新加的一判，因为发现 `docs/DEBT.md` 被中英 README、CHANGELOG 与本报告点名，
+  `docs/ARCHITECTURE.md` 被中英 README 点名，而打包清单里没有它们 —— 读着说明书去找欠账台账会扑空）：
+  `SHIPPED_DOCS` 补上这两份，打包审计增加一条闭包检查 —— 逐份被打包的 markdown 里出现的 `docs/<名>.md`，
+  若这个文件在本分支的源码树里存在却没进包，审计直接失败。只在文字里被点名、本分支源码树里根本没有的路径
+  （§7.7 末用 `docs/DEPLOY-K3S.md` 写"公开线不含什么"）算叙述，不算指针。
+  证人：把 `docs/DEBT.md` 从清单里删掉再跑，审计红四条
+  （`README.md / README.zh-CN.md / CHANGELOG.md / docs/TEST-REPORT.md points at docs/DEBT.md, which is not in the artifact`，
+  `scratch/release-knife-docs.log`，退出码 1）；装回去之后同一支跑出 `doc references: closed over 8 shipped markdown files`。
+  这条判据在 `scripts/build-release.mjs` 里，台面没有任何一腿读它（`grep -rn "build-release" tests/ scripts/run-gates.mjs` 打空），
+  所以它的证人是上面这两次打包，不是台面。
 - 版本与标签：`package.json` 停在 `1.0.1`，注解标签 `v1.0.1` 移到本轮最后一条提交（它从未推送过，
   移动不重写任何公开历史）；**公开的 `v1.0.0` 不动**，仍指向 `e1958a5`。
 - Word 交付物：`docs/*.docx` 不进 git（`.gitignore:25`），本机用 `node scripts/md-to-docx.mjs <文件…>` 现生成。
