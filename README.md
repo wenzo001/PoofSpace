@@ -51,7 +51,7 @@ Requirements: Node.js ≥ 20.9 (developed and verified on v24.16.0). `better-sql
 module, so a toolchain or a matching prebuilt binary is needed on the target platform.
 
 ```bash
-npm test             # 14 files / 156 automated checks
+npm test             # 14 files / 157 automated checks (two invocations: the suite, then the 100-member perf lane)
 npm run typecheck
 npm run gates        # the full acceptance table (B1–B10 + T1–T6)
 npm run release      # build → stage artifact → boot it → extract the tarball and boot that too
@@ -128,8 +128,8 @@ This repository does not accept "looks secure". Every gate was mutation-tested f
 was deliberately broken and the gate was required to go red — and skipped checks are never counted as
 passing (`SKIP` is a distinct verdict, and the strict table fails on it).
 
-Current state: **16 gates PASS / 0 FAIL / 0 SKIP** (`npm run gates`), 156 automated checks, plus a
-real-browser lane (10 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
+Current state: **16 gates PASS / 0 FAIL / 0 SKIP** (`npm run gates`), 157 automated checks, plus a
+real-browser lane (16 legs) that renders the app in chromium over both `http://<ip>:<port>` (a genuine
 non-secure context, where `crypto.subtle` is absent and the bundled pure-JS AES-GCM path is used) and
 real TLS. Highlights:
 

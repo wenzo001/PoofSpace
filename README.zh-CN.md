@@ -47,7 +47,7 @@ npm run dev          # 自定义 Node 服务 + Next.js，http://localhost:3000
 目标平台要么有匹配的预编译二进制，要么有编译工具链。
 
 ```bash
-npm test             # 14 个文件 / 156 条自动化判据
+npm test             # 14 个文件 / 157 条自动化判据（两次调用：整个套件，然后单独跑 100 人压力线）
 npm run typecheck
 npm run gates        # 整张验收台面（B1–B10 + T1–T6），SKIP 一律不算通过
 npm run release      # 构建 → 暂存产物 → 启动它 → 再把 tar 包解压出来启动一遍
@@ -115,8 +115,8 @@ npm run admin:data:purge-all -- --yes             # 清空全部房间/密文/�
 本仓库不接受"看起来挺安全"。每道门禁在相信它的绿之前都先被证明会红 —— 即先把产品代码故意改坏，
 看那一条判据是否变红；跳过（SKIP）永远不算通过，严格台面会因 SKIP 失败。
 
-当前状态：**16 道门 PASS / 0 FAIL / 0 SKIP**（`npm run gates`），156 条自动化判据，
-外加真实浏览器线 10 条腿：在 chromium 里同时跑 `http://<局域网 IP>:<端口>`（真的非安全上下文，
+当前状态：**16 道门 PASS / 0 FAIL / 0 SKIP**（`npm run gates`），157 条自动化判据，
+外加真实浏览器线 16 条腿：在 chromium 里同时跑 `http://<局域网 IP>:<端口>`（真的非安全上下文，
 `crypto.subtle` 缺席，走打包进产物的纯 JS AES-GCM）与真 TLS。几处重点：
 
 - 静态只存密文：同一个明文标记会去"出站 WebSocket 帧 / SQLite 文件 / 房间临时目录"三处找，必须一处都没有。

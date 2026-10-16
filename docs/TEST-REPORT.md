@@ -14,6 +14,14 @@
 `abi=137`，包体 `release/poofspace-deploy.tar.gz` 96,096,390 字节，产物顶层含 `LICENSE / README.md / README.zh-CN.md / CHANGELOG.md`）。
 同一个包的**前一次**整台面是 `13 PASS / 3 FAIL`，三条红全部来自浏览器线的一条腿（`https lock tooltip` 建房 30 s 超时），
 单跑该腿绿、台面重跑整条绿 —— 这是一次未复现的间歇红，按签名登记在 D20，不当成"已排除"，也不拿第二次绿抹掉第一次红。
+
+**v1.0.1 这一轮的最新一次整台面**（`scratch/certify-v101c.log`）：**16/16 PASS、0 FAIL、0 SKIP**，`GATES_EXIT=0`；
+157 条自动化判据（`npm test` 已拆成两次调用：148 + 9），浏览器线 16 条腿。
+这轮台面**不是一次就绿**：今天共整跑 9 遍，两次全绿（`certify-table2.log`、`certify-v101c.log`），七遍至少红一条；
+红的分布是 T5 五次、T4 四次（同一遍可两条一起红），签名分别是抖动腿"帧根本没到"（D27）与压力线的
+两种形状（子进程静默死掉 / 只剩 `long-run storage hygiene` 一条红，D26）。两条都登记在册，
+没有用"再跑一遍就绿"冒充排除；该抖动腿在换成"按到达定界"之后单独整跑 11 遍：绿 9、红 2，红的那两遍
+读数与其它红遍同签名。逐刀台账在 `scratch/mutation-ledger-spec8.md` 的"追加""追加二"两节。
 这一轮判定的是**补充规范《临时数据、房间销毁、容量限制与服务器管理》落地之后的树**：
 `ACTIVE → IDLE_GRACE(300 s) → DESTROYING → DESTROYED`、`MAX_ROOMS=20` 的名额账、销毁后不留房间记录、
 超出 `DELETE` 的存储清理（WAL/SHM/自由页）、以及只在本地跑的两条运维命令。新增的 30 条治理判据与
@@ -35,14 +43,14 @@
 | B5 | SQLite 与房间临时数据跨重启保留，且不被发布覆盖/携带 | PASS | 产物内运行数据：none；两条启动链各自验过"重启后邀请仍可进入（恢复窗口内）、已销毁房间不复活" |
 | B6 | HTTP IP:端口 与 HTTPS 均可创建/加入/使用 | PASS | http：`insecure context crypto` 绿；https：`history decrypts`、`https lock tooltip` 绿 |
 | B7 | 真实浏览器里跑应用层加密、授权与历史（两种模式） | PASS | `home two entries`、`insecure context crypto`、`history decrypts`、`no rng no send`、`virtual list geometry`、两个 tooltip 全绿 |
-| B8 | WebSocket 在 http / wss / 异常断线后可用 | PASS | security+lifecycle 6 文件 55 条绿（含 wss 握手、代理信任、重连补拉、销毁 vs 重连、心跳宽限比例、**协议 pong 续席**） |
+| B8 | WebSocket 在 http / wss / 异常断线后可用 | PASS | security+lifecycle 6 文件 56 条绿（含 wss 握手、代理信任、重连补拉、销毁 vs 重连、心跳宽限比例、**协议 pong 续席**） |
 | B9 | 安全上下文 API 缺失时**绝不静默退回明文** | PASS | `create requests=0`、`.notice-error` 命中、未进入 `/room/...`、页面未崩 |
 | B10 | 锁形提示与实际协议一致、不作虚假保证 | PASS | `isSecureContext=false` 时显示 HTTP 文案、true 时显示 HTTPS 文案，逐字比对 |
 | T1 | 功能线（创建/分享/加入/恢复、昵称、分页、容量） | PASS | 3 文件 62 条 |
-| T2 | 安全线（静态无明文、服务端不可解、伪造/重放/跨房间被拒） | PASS | 2 文件 25 条 |
+| T2 | 安全线（静态无明文、服务端不可解、伪造/重放/跨房间被拒） | PASS | 2 文件 26 条（本轮多的那一条是 `confines the dev eval exemption to the development policy`，见 §7.7 与 D22） |
 | T3 | 生命周期线（`ACTIVE→IDLE_GRACE(300 s)→DESTROYING→DESTROYED`、重启、凭据失效） | PASS | 4 文件 30 条（含 299 s 回原房间、301 s 被拒、刷新不销毁、宕机过期、房间互不影响） |
-| T4 | 性能线（100 成员、广播、重连抖动、大文件与文字并行、不增长） | PASS | 2 文件 9 条，71.6 s（台面里这条腿用 `--no-file-parallelism` 串行跑，理由见 §1.1 与 D13） |
-| T5 | 真实浏览器线整体 | PASS | 10 条腿全绿（逐条读数见 §2；本轮新增 `recovery entry disappears after destroy` 与 `served html makes no transport assurance`，见 §7.5） |
+| T4 | 性能线（100 成员、广播、重连抖动、大文件与文字并行、不增长） | PASS | 2 文件 9 条，59.9 s（台面里这条腿用 `--no-file-parallelism` 串行跑，理由见 §1.1 与 D13；本轮它红过三次，签名见 D26） |
+| T5 | 真实浏览器线整体 | PASS | 16 条腿全绿（逐条读数见 §2；本轮新增六条腿与两处换形，见 §7.7。它在这一轮红过三次，签名是"帧根本没到"，登记为 D27） |
 | T6 | 治理线（`MAX_ROOMS` 名额账、严禁长期保存的清理证明、本地运维命令） | PASS | 3 文件 30 条；`every tests/ directory is claimed by a lane`（这条腿还先把"磁盘上的测试目录有没有台面认领"双向差集扫了一遍，漏一个就 FAIL） |
 
 ### 1.1 全量 vitest（并发跑整棵 `tests/`）的三次独立读数 —— 压力腿的抖动率在这里
@@ -68,25 +76,45 @@
 **注意记账口径**：这条新判据是本批自己加的，不算本批的证人；本批的证人是台面 T4 本身 —— 改前 `FAIL (65.0s)`、改后 `PASS (64.6s) 2 files, 9 tests`
 （`scratch/gates-final3.log` vs `scratch/gates-grace.log`）。剩下那条 12:29 的"10 s 定点预约超时"未复现，按 D13 单独记账，不当成已修。
 
-## 2. 真实浏览器线的逐条读数（chromium，10 条腿 / `LANE_EXIT=0`）
+## 2. 真实浏览器线的逐条读数（chromium，16 条腿 / `LANE_EXIT=0`）
 
 `node scripts/run-browser-tests.mjs` 在 `http://poof.insecure:PORT`（非安全上下文）与
-`https://127.0.0.1:PORT`（真 TLS）两个来源上各起一台**独立 DATA_DIR** 的服务，最后一次全绿的读数：
+`https://127.0.0.1:PORT`（真 TLS）两个来源上各起一台**独立 DATA_DIR** 的服务，最后一次全绿的读数
+（`scratch/lane-o1.log`，逐字截断到行宽）：
 
 ```
 PASS home two entries: primary buttons ["创建聊天室","加入聊天室"]; account affordances 0
 PASS insecure context crypto: subtle=false secure=false; marker rendered=true;
      plaintext in 0 outgoing frames: 0; in sqlite: false; in room temp files: false
 PASS history decrypts for a late joiner: guest rendered the host message 1 time(s)
-PASS http lock tooltip: isSecureContext=false; tooltip matches the protocol
-PASS no rng no send: renderer crashed=false; stayed out of /room/…; create requests=0;
-     notice count=1; notice text="CSPRNG unavailable: crypto.getRandomValues is missing in this context"; page errors=0
+PASS recovery entry disappears after destroy: other device's card before=1 after=0;
+     server said not-joinable=true; vault entry left=false; states=none
+PASS http lock tooltip: isSecureContext=false; tooltip matches the protocol;
+     before opening it the text claimed https=false
+PASS served html makes no transport assurance: status=200; tooltip present in first paint=true;
+     https claim in served bytes=false; http-warning copy present=true
+PASS no rng no send: renderer crashed=false; create requests=0; notice count=1;
+     notice text="CSPRNG unavailable: crypto.getRandomValues is missing in this context"; page errors=0
 PASS browser notification content: backgrounded+granted notifications=
      [{"title":"收到一条加密消息","body":""}] (expected exactly 1, message marker absent);
      foregrounded+granted total=1 (expected 1); backgrounded+denied total=1 (expected 1)
      while all three bubbles rendered
-PASS virtual list geometry: sent 120: rendered rows 9, bubbles 9, sizer 10314px vs viewport 586px,
+PASS virtual list geometry: sent 120: rendered rows 15, bubbles 15, sizer 8400px vs viewport 586px,
      short rows 0, stacked rows 0
+PASS pinned list holds on incoming: frames 56/56/74; sizer-growth at 24ms/21ms;
+     inbound-frame seen at 24ms/21ms; single arrival travel 92px reversals 0 sizer +92px vs row 92.3px
+     distance 0; burst travel 92px reversals 0 distance 0
+PASS copy control reveals and honors the selection: hover: opacity 0->1;
+     selected "复制判据探针：前半" copied="复制判据探针：前半"; touch: coarse=true opacity=1 pill=28px
+     bandAbove=true bandBelow=true
+PASS first run names the device and identity reaches peers: gate offered=1 roomIdBefore=0;
+     suggestion=… reroll=… cached=…; peer gate=1 author label seen by peer=cached;
+     own row av=0 author=0 h=70.3 vs peer av=1 h=92.3
+PASS an uploaded image reaches the other device: peer rows 1, img.thumb 1, naturalWidth>0 1,
+     placeholders 0; bytes 326
+PASS joined rooms appear as history on the home page: section "历史"; state "房间仍在进行"
+PASS destroying leaves the room and returns home: creator path "/", member path "/",
+     server not-joinable=true (after 1 polls)
 PASS https lock tooltip: isSecureContext=true; tooltip matches the protocol
 ```
 
@@ -97,9 +125,11 @@ PASS https lock tooltip: isSecureContext=true; tooltip matches the protocol
 - `virtual list geometry` 打在**渲染后的几何**上（DOM 行数、占位高度、视口高度），不是"组件存在"。
 - `browser notification content` 用第二台设备（独立 context）收消息，把"后台恰好一次 / 前台不弹 /
   未授权不弹 / 通知面不含房间材料"四件事一次跑完；它的手术刀见 §3.1。
+- `pinned list holds on incoming` 的两个时刻列（`sizer-growth` 与 `inbound-frame`）是**故意分开记的**：
+  绿的时候它们重合（24ms/24ms），红的时候后者是 `never` ⇒ 一眼分辨"帧没到"与"页面包住了不画"。见 §7.7 与 D27。
 
 > 工装说明：`node scripts/run-browser-tests.mjs --only <子串>` 只跑被点名的腿，用于给单条判据下刀而不必整跑全条线。
-> **它不能读成台面结论** —— 过滤后的那一趟会自己记一条 `SKIP lane scope: 跑了 N/8 条腿`，退码因此是 1；
+> **它不能读成台面结论** —— 过滤后的那一趟会自己记一条 `SKIP lane scope: 跑了 N/16 条腿`，退码因此是 1；
 > 只有不带 `--only` 的整跑（本报告 §2 与台面 B6/T5）才是 `PASS`。
 
 ## 3. 判据自己的证人（变异测试）
@@ -398,4 +428,60 @@ T4 71.6 s（2/9）、T5 十条腿全绿、T6 8.6 s（3/30）。
 "Publishing to GitHub"，其中 `package.json` 的 `repository`/`homepage`/`bugs` 三格要由所有者填自己的公开地址，
 本报告与脚本都不替他猜 URL。
 本报告之前各轮所写的"未提交、未打标签"是当时的状态，不是现在的。
+
+### 7.7 用户手测出来的五条界面缺陷，与 dev 现场的三条（2026-10-15 晚，第三轮）
+
+这一轮的输入全部是"我自己点出来的"，不是规范里的一句话，所以每条的判据都打在**渲染后的东西**上，
+台账逐刀记在 `scratch/mutation-ledger-spec8.md` 的"追加"与"追加二"两节。
+
+浏览器线从 10 条腿涨到 16 条（+TLS 那一格共 16 行读数）。新增六条：
+
+| 腿 | 它到底在读什么 | 各自的刀（红相） |
+| --- | --- | --- |
+| `first run names the device and identity reaches peers` | 没缓存昵称时建房/进房会被拦住、给的名字可换、只有确认过那一次才写缓存；对端看到的作者标签是从渲染后的 `.author` 读的；自己那一行既无头像也无名字且比对端矮 | K1 门禁放行未确认的名字 ⇒ `roomIdBefore=1`；K2b join 用兜底名 ⇒ `author label seen by peer="我"`；K3 自己那行重新带头像+名字 ⇒ `own av=1 author=1 h=92.3 vs peer 92.3` |
+| `an uploaded image reaches the other device` | 真让浏览器画一张 PNG 上传，再看**对方**那一行：`img.thumb` 恰好 1 个、`naturalWidth>0`、占位框 0 个 | K4 摘掉 `metaFor`（回到死入口）⇒ 腿在"对端一直没渲染出图"那一步抛错；K5 外层占位框不再随 meta 收起 ⇒ `placeholders 1` |
+| `joined rooms appear as history on the home page` | 加入过、且没销毁的房间在这台设备的首页列表里，标题就叫"历史" | K6a 标题不改 ⇒ 该腿红（第一趟驱动只留了判决行，逐字读数没留档）；K6b 整段不渲染 ⇒ 腿在等 `.section-title` 时抛错 |
+| `destroying leaves the room and returns home` | 房主与成员两边的 `location.pathname` 都得是 `/`，并由服务端确认这个房间不再可进 | K8 摘掉 `destroyed` 事件里的返回 ⇒ 成员留在死房里 |
+| `recovery entry disappears after destroy`（改写） | 换到 loopback 直读服务端：房主销毁后，**另一台设备**那张卡片消失、本机 vault 里也不留 | —（改的是量具：`poof.insecure` 这个主机名只存在于 chromium 的 host-resolver 规则里，Node 侧的 `http.get` 永远连不上） |
+| `pinned list holds on incoming`（换形） | 钉在底部的列表，来消息时只能**朝前**走：`travel === sizer 增量`、`reversals 0`、离底距离 0，单条到达时 sizer 恰增长那一行实测高度 | J1 观察器用第一次渲染的 `heights` 建 map ⇒ `reversals 1`、`sizer +84`（正是要估计值的坑）；J1b 无变化的那一支交回旧 map ⇒ `sizer +−8px`；J2 摘掉钉底那一行 ⇒ 热身阶段就等不到 |
+
+三条 dev 侧：`npm run dev` 点了没反应（服务端把非 `/ws` 的 upgrade 一律 `socket.destroy()`，
+Next 的 dev HMR socket 死在半路 ⇒ 页面渲染了但一次事件都没接上；D21 登记、已实测对照），
+dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一支放行 `'unsafe-eval'`，
+生产串一个字没动；判据把"dev 有 / 生产无 / 未设 NODE_ENV 也无"三格一起钉住），
+以及 `/favicon.ico` 404（D24，OPEN）。
+
+两处**没证到**的，写在这里不当已通过：
+
+1. `ownRowIsTighter`（自己那行更矮）只被 K3 那一把刀顺带抓住，没有独立变异 —— 把间距改回去两边一起长，
+   比较式翻转不了。
+2. 房主自己销毁时那句 `window.location.assign('/')` 实测不是绑定路径（K7 绿）：真正兑现"销毁后离开"的是
+   `destroyed` 事件那一臂。那句留着是因为 `client.close()` 与通知到达的先后不保证，但这条腿分辨不出它有没有生效。
+
+压力线这一轮单独立了两条账（D25 独占机器、D26 `pool: 'forks'` 下子进程静默死掉），并把
+`npm test` 拆成"除 `tests/perf`"+"`tests/perf`"两次调用。同时给测试台架的 **connect 这一条边**加了重试：
+`reconnect churn` 的两种红相（`ROOM_FULL` 与 `socket error`）里，后者发生在台账 `{"rows":80,"online":80}` 的时刻
+—— 座位空着、是操作系统拒了握手。重试只认连接类失败，`ROOM_FULL` 一律不重试；这条边的牙重新下过一遍：
+把 `service.ts` 的容量判据改成"见人就拒"之后压力线立刻红（`scratch/pf-knife.log`，读数含 `ROOM_FULL`），
+撤刀后 `stress.test.ts` 单跑 3/3 绿、`tests/perf` 两文件 2/2 绿。
+
+分支模型也变了（不是我改的代码内容）：`main` 现在是公开线，不含 `Dockerfile` / `.gitlab-ci.yml` /
+`docker/` / `k8s/` / `docs/DEPLOY-K3S.md`；公司运行配置在 `internal-deploy` 上、只推 `lc`。
+判据是 `git ls-tree -r --name-only main | grep -cE '^(Dockerfile|\.dockerignore|\.gitlab-ci\.yml|docker/|k8s/|docs/DEPLOY-K3S\.md)'`
+＝ `0`（本轮实测为 0）。
+
+### 7.8 v1.0.1 的包与状态
+
+- 包：`npm run release`（含一次全量构建）→ `REL_EXIT=0`，`release/build-info.json` 记
+  `builtAt=2026-10-16T00:28:25.894Z`、`nextBuildId=1XSVPobAxDkyjpEtM5qpv`，暂存树与解开的 tar 包**两边都启动验证过**。
+  之后台面 B1 那条腿还会自己重跑一次 `npm run build`，所以"被 16/0/0 认证的那次编译"与"交付包里的字节"
+  仍然要按 §7.6 末尾的口径分开说。
+- 判定：`scratch/certify-v101c.log` = **16 PASS / 0 FAIL / 0 SKIP**（同一棵代码树今天另有一遍 16/0/0，
+  中间七遍至少红一条，见 §0 的分布与 D26/D27）。
+- 版本：`package.json` 升到 `1.0.1`，注解标签 `v1.0.1` 打在本轮最后一条提交上；
+  **公开的 `v1.0.0` 标签不动**（它已经指向 `e1958a5`），也不重写已公开的历史。
+- Word 版文档从公开线里去掉（`docs/*.docx` 改成由 `node scripts/md-to-docx.mjs <文件…>` 现生成的交付物，
+  不再进 git）；口径写进 `.gitignore` 那一格，含"main→internal-deploy 合并会把公司线上这几个 .docx 一并删掉"
+  这一条后果。
+- 建仓与推送仍归执行人：本轮只在本地提交、打标签。
 
