@@ -2091,6 +2091,70 @@ async function sendingLandsAtTheBottom(browser, origin, emit) {
   }
 }
 
+/**
+ * The other half of "scroll to the bottom when there is new content": someone else sends while the
+ * reader is already at the bottom, and the reader must stay there. The pin is
+ * `virtuoso.ts`'s `if (pinnedRef.current) node.scrollTop = node.scrollHeight`.
+ *
+ * `pinnedListHoldsOnIncoming` sits next to this one and does NOT cover it: that leg judges relative
+ * movement (the bottom may step forward by the arriving row, never backwards), so a pin that simply
+ * does nothing keeps its arithmetic intact. Disabling the pin here was meant to leave that leg green
+ * as an independence witness, and it did not — it failed by a setup timeout, which is D27's usual
+ * signature, so the two runs cannot be attributed to the cut and no independence is claimed. What
+ * this leg does carry is its own before/after: green at `0px before, 0px after`, red at
+ * `46px before, 366px after, the last one on screen=false`.
+ */
+async function inboundKeepsYouPinnedAtTheBottom(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  const bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
+  const b = await bCtx.newPage();
+  try {
+    const { roomId, link } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await gotoPage(b, link);
+    await acceptNickname(b);
+    await b.waitForSelector('.composer textarea', { timeout: 30000 });
+    // "At the bottom" needs a list that overflows: a short one sits at the top whatever the pin
+    // does, and the reading would be vacuous.
+    for (let i = 1; i <= 10; i++) {
+      await a.page.locator('.composer textarea').fill(`占位第 ${i} 条`);
+      await a.page.keyboard.press('Enter');
+      await new Promise((r) => setTimeout(r, 90));
+    }
+    await a.page.waitForFunction(() => document.querySelectorAll('.bubble').length >= 10, null, { timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 500));
+    const before = await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      return { gap: Math.round(l.scrollHeight - l.scrollTop - l.clientHeight) };
+    });
+    for (let i = 1; i <= 4; i++) {
+      await b.locator('.composer textarea').fill(`对端发来的第 ${i} 条`);
+      await b.keyboard.press('Enter');
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    await a.page.waitForFunction(() => [...document.querySelectorAll('.bubble')].some((x) => (x.textContent || '').includes('对端发来的第 4 条')), null, { timeout: 30000 });
+    await new Promise((r) => setTimeout(r, 600));
+    const after = await a.page.evaluate(() => {
+      const l = document.querySelector('.list');
+      const hit = [...document.querySelectorAll('.bubble')].find((x) => (x.textContent || '').includes('对端发来的第 4 条'));
+      return {
+        gap: Math.round(l.scrollHeight - l.scrollTop - l.clientHeight),
+        lastVisible: hit ? hit.getBoundingClientRect().bottom <= window.innerHeight + 2 : false
+      };
+    });
+    const ok = before.gap <= 2 && after.gap <= 2 && after.lastVisible === true;
+    record(
+      'a message from someone else keeps a reader at the bottom pinned there',
+      ok ? 'PASS' : 'FAIL',
+      `reader was ${before.gap}px from the bottom before, ${after.gap}px after four inbound messages; the last one on screen=${after.lastVisible}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} what arrives from someone else keeps you where you already were`);
+  } finally {
+    await bCtx.close();
+    await a.context.close();
+  }
+}
+
 async function homeReportsTheLastHeadCount(browser, origin, emit) {
   const a = await openHome(browser, origin);
   const bCtx = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -2395,6 +2459,7 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
           ['an image message has one frame, at both widths', () => imageBubbleIsTheImageItself(browser, httpOrigin, emit)],
           ['sending a message lands at the bottom', () => sendingLandsAtTheBottom(browser, httpOrigin, emit)],
+          ['a message from someone else keeps a reader at the bottom pinned there', () => inboundKeepsYouPinnedAtTheBottom(browser, httpOrigin, emit)],
           ['the dialog text is drag-selected, not select-all on click', () => dialogTextIsDragSelectable(browser, httpOrigin, emit)],
           ['the home page reports the head count seen while inside', () => homeReportsTheLastHeadCount(browser, httpOrigin, emit)],
           ['destroying leaves the room and returns home', () => destroyLeavesTheRoom(browser, httpOrigin, emit)]
