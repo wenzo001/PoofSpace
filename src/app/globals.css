@@ -283,9 +283,13 @@ a {
 .me {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: var(--s-2);
   min-height: var(--tap);
-  padding: var(--s-1) var(--s-3) var(--s-1) var(--s-1);
+  /* Symmetric on purpose. This pill used to carry 4px on the left and 12px on the right, which is
+     invisible at rest and obvious the moment hover draws the ring: the avatar hugs the border while
+     the name has twice the air. */
+  padding: var(--s-1) var(--s-3);
   border-radius: var(--r-pill);
   border: 1px solid transparent;
 }
@@ -1196,6 +1200,12 @@ a {
   .me .name {
     display: none;
   }
+  /* With the name hidden this pill is an icon button, so it becomes a 44pt square with the avatar
+     in the middle instead of a 45x44 box with the avatar 3px off one edge. */
+  .me {
+    min-width: var(--tap);
+    padding: var(--s-1);
+  }
   .row {
     padding: 0 var(--s-2);
   }
@@ -1342,10 +1352,6 @@ a {
   font-family: var(--sans);
   font-weight: 600;
   line-height: 1;
-}
-
-.me {
-  padding: 3px 12px 3px 3px;
 }
 
 .me .name,

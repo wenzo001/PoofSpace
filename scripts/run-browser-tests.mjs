@@ -2137,6 +2137,66 @@ async function previewReleasesTheDecryptedImage(browser, origin, emit) {
   }
 }
 
+/**
+ * The identity pill draws its ring only on hover, so an asymmetric inset is invisible until the
+ * moment the reader is about to press it -- that is what "hover 边框和内容视觉不居中" describes.
+ * Judged as the rendered gaps between the content box and the inner edge of the ring, at the width
+ * where the name shows and the width where it is hidden (there the pill is an icon button and has to
+ * square up). Hover is measured too: the border is transparent in the resting rule, so it must not
+ * move anything.
+ */
+async function identityPillCentersItsContent(browser, origin, emit) {
+  const read = (page) =>
+    page.evaluate(() => {
+      const btn = document.querySelector('button.me');
+      if (!btn) return null;
+      const cs = getComputedStyle(btn);
+      const pill = btn.getBoundingClientRect();
+      const border = parseFloat(cs.borderTopWidth) || 0;
+      const boxes = [...btn.querySelectorAll('.av, .name')]
+        .map((el) => el.getBoundingClientRect())
+        .filter((r) => r.width > 0 && r.height > 0);
+      if (!boxes.length) return null;
+      const inner = { l: pill.left + border, r: pill.right - border, t: pill.top + border, b: pill.bottom - border };
+      return {
+        w: Math.round(pill.width),
+        h: Math.round(pill.height),
+        left: Math.round(Math.min(...boxes.map((b) => b.left)) - inner.l),
+        right: Math.round(inner.r - Math.max(...boxes.map((b) => b.right))),
+        top: Math.round(Math.min(...boxes.map((b) => b.top)) - inner.t),
+        bottom: Math.round(inner.b - Math.max(...boxes.map((b) => b.bottom))),
+        border: `${cs.borderTopWidth} ${cs.borderTopStyle}`
+      };
+    });
+  const arms = [];
+  for (const vp of [
+    { tag: 'wide', width: 1280, height: 800 },
+    { tag: 'narrow', width: 390, height: 844 }
+  ]) {
+    const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 2 });
+    try {
+      const page = await context.newPage();
+      await gotoPage(page, `${origin}/`);
+      await page.waitForSelector('button.me .av', { timeout: 20000 });
+      const rested = await read(page);
+      const box = await page.locator('button.me').boundingBox();
+      await page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      await new Promise((r) => setTimeout(r, 300));
+      const hovered = await read(page);
+      arms.push({ tag: vp.tag, rested, hovered });
+    } finally {
+      await context.close();
+    }
+  }
+  const centred = (g) => !!g && Math.abs(g.left - g.right) <= 1 && Math.abs(g.top - g.bottom) <= 1;
+  const ok = arms.every(({ rested, hovered }) => centred(rested) && centred(hovered));
+  const line = ({ tag, rested, hovered }) =>
+    `${tag}: ${rested ? `${rested.w}x${rested.h} gaps L${rested.left}/R${rested.right}/T${rested.top}/B${rested.bottom}` : 'unreadable'}` +
+    `${hovered ? ` | hovered L${hovered.left}/R${hovered.right}/T${hovered.top}/B${hovered.bottom} border ${hovered.border}` : ''}`;
+  record('the identity pill centers its content', ok ? 'PASS' : 'FAIL', arms.map(line).join('; '));
+  emit(`${ok ? 'PASS' : 'FAIL'} the identity pill centres its content inside the hover ring`);
+}
+
 async function dialogStaysPutWhileTheListMoves(browser, origin, emit) {
   const a = await openHome(browser, origin);
   try {
@@ -2737,6 +2797,7 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['a paste sends every file the clipboard carries', () => clipboardPasteSendsEveryItem(browser, httpOrigin, emit)],
           ['a file card keeps its name, size and button in place', () => fileCardKeepsItsTextColumn(browser, httpOrigin, emit)],
           ['button and avatar labels sit on their own center line', () => controlLabelsSitOnTheCenterLine(browser, httpOrigin, emit)],
+          ['the identity pill centers its content', () => identityPillCentersItsContent(browser, httpOrigin, emit)],
           ['the full-text dialog scrolls and keeps its buttons on screen', () => longMessageModalScrollsInPlace(browser, httpOrigin, emit)],
           ['the image preview is the top layer over the chat', () => imagePreviewIsTheTopLayer(browser, httpOrigin, emit)],
           ['the image preview zooms and closes on Escape', () => previewZoomsAndClosesOnEscape(browser, httpOrigin, emit)],
