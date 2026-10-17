@@ -37,8 +37,14 @@
 | **`appendToEl` 不在 `LightboxOptions` 上** | 只在 `photoswipe.d.ts:180`（`PhotoSwipeOptions`） |
 | **但运行时能传到核心** | `photoswipe-lightbox.esm.js:1901-1902`：`new module(this.options)` —— 整个 options 原样交给 PhotoSwipe 构造 |
 | 库会写一个全局 | 同文件 `:1903` `window.pswp = pswp` |
+| **这四个选项不存在**（第一版计划凭印象写的，已被 tsc 面提前抓到） | `maxSpreadZoom`、`modal`、`closeOnEsc`、`arrowKeyPaths` —— 逐个查过 `PreparedPhotoSwipeOptions`，全部没有 |
+| 真正的缩放上限 | `maxZoomLevel`（`photoswipe.d.ts:227`，类型 `ZoomLevelOption`）；另有 `initialZoomLevel:225`、`secondaryZoomLevel:226` |
+| ESC / 方向键**没有开关选项** | 它们由 Keyboard 模块无条件处理（`photoswipe.esm.js:3101-3104` 的 `KeyboardKeyCodesMap` 含 `Escape`/`ArrowLeft`），要关只能关模块 |
+| 模块开关确实存在 | `zoom`、`keyboard`、`gestures`、`ui` 四个都在选项表里 —— 缩放与平移分别住在 `zoom`/`gestures` 模块内 |
 
 ⇒ 适配器必须用一个交叉类型把 `appendToEl` 合法地传进去，否则 tsc 拦下（运行时本来是通的，这是**类型面的缺口**，不是能力缺口）。
+
+⇒ `zoom: true` 与 `gestures: true` 要**显式写**：模块不起就没有缩放与平移，而这正是本功能的全部诉求；靠默认值等于把功能押在别人发版上。
 
 ---
 
@@ -278,11 +284,12 @@ export default function ImagePreview({ items, index, onClose }: { items: Preview
       pswpModule: () => import('photoswipe'),
       wheelToZoom: true,
       doubleTapAction: 'zoom',
+      zoom: true,
+      gestures: true,
+      keyboard: true,
+      maxZoomLevel: 4,
       spacing: 0.08,
-      maxSpreadZoom: 4,
-      modal: true,
-      closeOnEsc: true,
-      arrowKeyPaths: { toNext: true, toPrev: true }
+      clickToCloseNonZoomable: true
     } as LightboxOpts);
 
     lb.on('close', () => {
@@ -302,9 +309,16 @@ export default function ImagePreview({ items, index, onClose }: { items: Preview
 }
 ```
 
-**执行时必须逐条核对的两件事**（选项名以 `dist/types/photoswipe.d.ts` 与 `dist/types/lightbox/lightbox.d.ts` 为准，上面这份是按 5.4.4 的类型写的；若某个选项名不存在，tsc 会立刻指出，**不要**用 `as any` 把它糊过去）：
-1. `closeOnEsc` / `arrowKeyPaths` / `maxSpreadZoom` / `spacing` 是否都在 `PhotoSwipeOptions` 上；
-2. `dataSource` 传 `SlideData[]` 时 `alt` 字段名是否为 `alt`。
+**核对结果与一条要当心**（选项名已逐个对过 5.4.4 的 `dist/types/photoswipe.d.ts` 与 `lightbox/lightbox.d.ts`）：
+
+1. 上面这份用的 `appendToEl`、`dataSource`、`bgOpacity`、`showHideAnimationType`、`pswpModule`、`wheelToZoom`、
+   `doubleTapAction`、`zoom`、`gestures`、`keyboard`、`maxZoomLevel`、`spacing`、`clickToCloseNonZoomable`
+   **全部确实存在**。第一版计划里的 `maxSpreadZoom` / `modal` / `closeOnEsc` / `arrowKeyPaths` 是凭印象写的，
+   已删 —— ESC 与左右键由 Keyboard 模块无条件处理，没有单独开关，要关只能 `keyboard: false`。
+2. ⚠ `SlideData` 的类型是 `_SlideData & Record<string, any>`（`slide/slide.d.ts:4`）——
+   **它接受任意额外键**，所以 `alt` 写错成 `ait` 时 tsc 不会报错。这一格只能靠浏览器腿验（断言 alt 文本
+   真的到了 DOM），不能靠编译。这是"类型通过 ≠ 字段生效"那一族。
+3. 若将来升级 PhotoSwipe 导致某选项消失，tsc 会立刻指出 —— **不许**用 `as any` 糊过去。
 
 - [ ] **Step 3: 接上调用方**
 
@@ -358,10 +372,14 @@ git commit -m "feat(chat): a real image viewer, with the library DOM behind one 
 | 腿 | 判据（渲染后几何） | 刀 |
 | --- | --- | --- |
 | `the preview outranks the chat it came from`（既有，改指新 DOM） | 预览容器 `parentElement === document.body`；中心像素 `elementFromPoint` 命中查看器的图 | 去掉 `appendToEl` ⇒ 红（这一刀同时是 spec §2.4 的证人） |
-| `the preview zooms` | 打开后读缩放比例 `a`，滚轮上滚 ⇒ 读到 `b`，判 `b > a`；再下滚 ⇒ 判回落 | 传 `maxSpreadZoom: 1` ⇒ 缩放那条红 |
-| `the preview pans when zoomed` | 放大后拖拽中心 ⇒ 图像包围盒左移 ≥40px | 关掉拖拽 ⇒ 红 |
-| `the preview pages between images` | 发两张图，打开第一张，按 ArrowRight ⇒ 命中的 `src` 变成第二张 | 关掉 `arrowKeyPaths` ⇒ 红 |
-| `the preview releases the decrypted image on close` | 关闭后 `fullUrl` 的 blob 已被 revoke（`dropFull` 生效）：再取同一 id 走一次重新解密路径 | 摘掉 `onClose` 里的 `dropFull` ⇒ 红 |
+| `the preview zooms` | 打开后读缩放比例 `a`，滚轮上滚 ⇒ 读到 `b`，判 `b > a`；再下滚 ⇒ 判回落 | `zoom: false`（关掉 Zoomable 模块）⇒ 红 |
+| `the preview pans when zoomed` | 放大后拖拽中心 ⇒ 图像包围盒左移 ≥40px | `maxZoomLevel: 1` ⇒ 红。**但这一刀同时会让上一条红** —— 见下方"刀的重叠" |
+| `the preview closes on Escape and pages on arrows` | 按 ArrowRight ⇒ 命中的 `src` 变成第二张；按 Escape ⇒ 预览消失 | `keyboard: false` ⇒ 两半一起红（ESC 与方向键同住 Keyboard 模块，没有各自的开关） |
+| `the preview releases the decrypted image on close` | 关闭后 `fullUrl` 的 blob 已被 revoke：再取同一 id 会走一次重新解密路径 | 摘掉 `onClose` 里的 `dropFull` ⇒ 红（**唯一一把与库无关的刀**） |
+
+**刀的重叠，说清楚而不是假装没有**：平移是缩放的下游 —— 没放大的图不能平移，所以任何让"放大不了"的刀都会连带把缩放腿也弄红。
+这两条腿因此**不是两个独立证人**，它们的价值在**签名不同**：缩放腿红在"比例没变"，平移腿红在"比例变了、位置没变"。
+只有 `appendToEl`、`zoom: false`、`keyboard: false`、`dropFull` 摘除这四把是各自独立的。
 
 - [ ] **Step 2: ESC 与"点图不再误关"两条行为并进 `the preview zooms` 的判据里**（现状那两个是真缺陷：ESC 不存在、点图片本身会关闭）
 
@@ -397,4 +415,4 @@ Expected: `PASS = 腿数 × 2`，`FAIL/SKIP = 0`，`LANE_EXIT=0`
 
 **3. 类型一致性**：`PreviewItem{src,width,height,alt}` 在 Task 3 定义、Task 4 的判据只读渲染结果不依赖它；`imageDims` 返回 `{width,height}|null` 与 Task 2 Step 4 的 `dims?.width` 一致；`dropFull`/`fullUrl` 沿用现有名字未改。
 
-**4. 一处歧义已定死**：`maxSpreadZoom: 1` 作为刀会让"缩放"腿红，但它同时可能影响"平移"腿 —— 两把刀**必须分开下**，一次只动一个 observable，否则红的集合说不清是谁守的。
+**4. 一处歧义已定死**：平移是缩放的下游，所以 `maxZoomLevel: 1` 这一刀会同时让缩放腿红 —— 两条腿**不是**两个独立证人，靠签名分辨（"比例没变" vs "比例变了位置没变"）。Task 4 的"刀的重叠"那段就是这个结论，不许在报告里把它们写成各自有牙。
