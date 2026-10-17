@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Avatar from '@/components/Avatar';
 import Modal from '@/components/Modal';
-import ImagePreview from '@/components/ImagePreview';
+import PreviewHost from '@/components/PreviewHost';
 import NicknameDialog from '@/components/NicknameDialog';
 import {
   BellIcon,
@@ -17,7 +17,7 @@ import { RoomClient } from '@/lib/client/roomclient';
 import { RoomStore, type RoomSnapshot, type UiMsg } from '@/lib/client/roomstore';
 import { LIMITS } from '@/lib/constants';
 import { DecryptError, type AttachmentMeta } from '@/lib/crypto/envelope';
-import { copyText, dropFull, formatBytes, formatTime, fullUrl, imageDims, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
+import { copyText, formatBytes, formatTime, imageDims, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
 import { currentPermission, notifyEncrypted, requestPermission } from '@/lib/client/notify';
 import { loadPrefs, setNotifyOptIn } from '@/lib/client/prefs';
 import { useNick } from '@/lib/client/identity';
@@ -106,6 +106,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const [notifyPerm, setNotifyPerm] = useState<string>('unsupported');
   const [draft, setDraft] = useState('');
   const [tipOpen, setTipOpen] = useState(false);
+  const [viewer, setViewer] = useState<{ ids: string[]; index: number } | null>(null);
 
   const subscribe = useMemo(() => (sess ? (cb: () => void) => sess.store.subscribe(cb) : () => () => {}), [sess]);
   const getSnapshot = useMemo(() => () => (sess ? sess.store.getSnapshot() : EMPTY_SNAPSHOT), [sess]);
@@ -128,6 +129,13 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const currentUploadKey = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
   sessionRef.current = sess;
+
+  // The click handler has to see the message list as it is *now*, but it is handed to a row that
+  // must not re-render on every keystroke in the composer. So the identity is permanent and the
+  // body is whatever the latest render wrote into the ref — a `useCallback` over `snap.messages`
+  // would have to list the snapshot as a dependency and re-render every row with it.
+  const openImageRef = useRef<(attachmentId: string) => void>(() => {});
+  const openImage = useCallback((attachmentId: string) => openImageRef.current(attachmentId), []);
 
   // Device-local state, so it cannot be known while rendering on the server. Assuming `true` there
   // put "当前连接使用 HTTPS。" into the HTML of a plain-http response — measured, not inferred: with
@@ -478,6 +486,16 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const link = client?.publicInvite.link ?? '';
   const code = client?.publicInvite.code ?? '';
   const canSend = !!client && snap.status === 'open' && !blocked;
+  // Paging needs the whole ordered list, and that list has to stop changing once the viewer is
+  // open: a message arriving mid-read would shift every index under the slide being looked at.
+  openImageRef.current = (id: string) => {
+    const ids = snap.messages
+      .map((m) => (m.kind === 'image' ? m.attachmentId : undefined))
+      .filter((x): x is string => !!x && !!snap.metas[x] && !snap.metaGaps.includes(x));
+    const index = ids.indexOf(id);
+    if (index < 0) return;
+    setViewer({ ids, index });
+  };
   const tip = (
     <SecurityLock
       secure={secure}
@@ -550,6 +568,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
                     onCopy={doCopy}
                     onRetry={(id) => void client?.retry(id)}
                     onAuthFail={reportAuthFailure}
+                    onOpenImage={openImage}
                   />
                 </div>
               );
@@ -614,6 +633,17 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
           发送
         </button>
       </div>
+
+      {viewer && client ? (
+        <PreviewHost
+          client={client}
+          ids={viewer.ids}
+          index={viewer.index}
+          metaOf={(id) => snap.metas[id]}
+          onAuthFail={reportAuthFailure}
+          onClose={() => setViewer(null)}
+        />
+      ) : null}
 
       {showInvite && invite ? (
         <Modal title="邀请别人加入" onClose={() => setShowInvite(false)}>
@@ -773,7 +803,8 @@ function MessageRow({
   uploads,
   onCopy,
   onRetry,
-  onAuthFail
+  onAuthFail,
+  onOpenImage
 }: {
   msg: UiMsg;
   client: RoomClient | null;
@@ -784,6 +815,7 @@ function MessageRow({
   onCopy: (key: string, text: string) => void;
   onRetry: (clientMsgId: string) => void;
   onAuthFail: () => void;
+  onOpenImage: (attachmentId: string) => void;
 }) {
   const [full, setFull] = useState(false);
   const long = isLongText(msg.text);
@@ -824,7 +856,7 @@ function MessageRow({
             </>
           ) : null}
           {msg.kind === 'image' && client && attachmentId && !metaGap ? (
-            <ImageBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
+            <ImageBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} onOpen={onOpenImage} uploading={progress(msg, uploads)} />
           ) : null}
           {msg.kind === 'file' && client && attachmentId && !metaGap ? (
             <FileBody client={client} id={attachmentId} meta={meta} onAuthFail={onAuthFail} uploading={progress(msg, uploads)} />
@@ -885,17 +917,18 @@ function ImageBody({
   id,
   meta,
   onAuthFail,
+  onOpen,
   uploading
 }: {
   client: RoomClient;
   id: string;
   meta: AttachmentMeta | undefined;
   onAuthFail: () => void;
+  onOpen: (attachmentId: string) => void;
   uploading: string | null;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [refused, setRefused] = useState(false);
-  const [zoom, setZoom] = useState<string | null>(null);
 
   useEffect(() => {
     if (!meta) return;
@@ -922,36 +955,10 @@ function ImageBody({
   if (refused) return <span className="thumb-placeholder">密文认证失败，已拒绝渲染</span>;
   if (!meta) return <span className="thumb-placeholder">准备加载…</span>;
   if (!url) return <span className="thumb-placeholder">缩略图生成中…</span>;
-  return (
-    <>
-      <img
-        className="thumb"
-        src={url}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        onClick={() => {
-          retain(id);
-          fullUrl(client, id, meta)
-            .then((u) => u && setZoom(u))
-            .catch((err: unknown) => {
-              if (err instanceof DecryptError) onAuthFail();
-            });
-        }}
-      />
-      {zoom ? (
-        <ImagePreview
-          // Width and height are omitted rather than guessed: a 1x1 placeholder would give the
-          // viewer a wrong fit and a wrong "100%", which is worse than letting it measure on load.
-          image={{ src: zoom, ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}) }}
-          onClose={() => {
-            dropFull(id);
-            setZoom(null);
-          }}
-        />
-      ) : null}
-    </>
-  );
+  // The row hands over the id and nothing else: decrypting the full image, holding it while the
+  // reader pages, and releasing it on close all belong to the viewer above the list, not to a row
+  // that can be unmounted by scrolling while its image is still on screen.
+  return <img className="thumb" src={url} alt="" loading="lazy" decoding="async" onClick={() => onOpen(id)} />;
 }
 
 function FileBody({

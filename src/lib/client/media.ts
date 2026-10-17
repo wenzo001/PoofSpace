@@ -133,6 +133,16 @@ export async function fullUrl(client: RoomClient, id: string, meta: AttachmentMe
   return work;
 }
 
+/**
+ * The thumbnail this device already has in memory, without starting any new work. The viewer uses
+ * it as the slide's first `src` so paging never shows an empty frame while the full image is still
+ * coming off the wire -- and an attachment no row has rendered stays empty rather than quietly
+ * decoding a second copy.
+ */
+export function cachedThumb(id: string): string | undefined {
+  return entries.get(id)?.thumb;
+}
+
 export function dropFull(id: string): void {
   const e = entries.get(id);
   if (!e) return;

@@ -1906,13 +1906,232 @@ async function previewZoomsAndClosesOnEscape(browser, origin, emit) {
     await a.page.keyboard.press('Escape');
     await new Promise((r) => setTimeout(r, 700));
     const gone = await a.page.evaluate(() => document.querySelector('[data-preview="viewer"]') === null);
-    const ok = !!fit && !!zoomed && fit.natural === 1200 && zoomed.w > fit.w && gone === true;
+    // Against the natural width, not against the fitted one: a viewer whose zoom is capped at 1x
+    // still grows from fit to natural, and `displayed > fit` called that a zoom. Measured -- with
+    // `maxZoomLevel: 1` this leg read 1080px at fit and 1200px after the wheel.
+    const ok = !!fit && !!zoomed && fit.natural === 1200 && zoomed.w > fit.natural && gone === true;
     record(
       'the image preview zooms and closes on Escape',
       ok ? 'PASS' : 'FAIL',
-      `natural ${fit ? fit.natural : 'none'}px; displayed ${fit ? fit.w : 'none'}px at fit, ${zoomed ? zoomed.w : 'none'}px after wheel-up; viewer gone after Escape=${gone}; room ${roomId.slice(0, 6)}`
+      `natural ${fit ? fit.natural : 'none'}px; displayed ${fit ? fit.w : 'none'}px at fit, ${zoomed ? zoomed.w : 'none'}px after wheel-up (must exceed ${fit ? fit.natural : 'none'}px of natural to count as magnification); viewer gone after Escape=${gone}; room ${roomId.slice(0, 6)}`
     );
     emit(`${ok ? 'PASS' : 'FAIL'} the preview zooms under the wheel and answers Escape`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+/**
+ * Paging is the half that needs a data source of more than one slide, so the two fixtures differ in
+ * size as well as in colour: one number equal to another would be the "symmetry that is green on
+ * empty" family. Measured on the decoded image, because a slide whose src is the 480px thumbnail
+ * also counts as "an image is on screen" -- and that is exactly the state the leg must not accept.
+ */
+async function previewPagesBetweenImages(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page.locator('.composer input[type=file]').first().setInputFiles([
+      { name: 'wide.png', mimeType: 'image/png', buffer: await bigPng(a.page, 1200, 800, '#2a8') },
+      { name: 'tall.png', mimeType: 'image/png', buffer: await bigPng(a.page, 600, 1000, '#c35') }
+    ]);
+    await a.page.waitForFunction(() => document.querySelectorAll('.msg.own img.thumb').length === 2, null, { timeout: 60000 });
+    await a.page.locator('.msg.own img.thumb').first().click();
+    await a.page.waitForSelector('[data-preview="image"] img', { timeout: 20000 });
+    const slide = () =>
+      a.page.evaluate(() => {
+        const img = document.querySelector('[data-preview="image"] img');
+        if (!img) return null;
+        return { src: img.src, w: img.naturalWidth, h: img.naturalHeight };
+      });
+    // Every arm waits for the size it is about to judge, so a slow decryption is a timeout with a
+    // reading rather than a re-read of the slide the key press left behind.
+    const at = async (w, h) => {
+      try {
+        await a.page.waitForFunction(
+          ([width, height]) => {
+            const img = document.querySelector('[data-preview="image"] img');
+            return !!img && img.naturalWidth === width && img.naturalHeight === height;
+          },
+          [w, h],
+          { timeout: 20000 }
+        );
+      } catch {
+        /* the reading below says what is actually on screen */
+      }
+      return slide();
+    };
+    const first = await at(1200, 800);
+    await a.page.keyboard.press('ArrowRight');
+    const second = await at(600, 1000);
+    await a.page.keyboard.press('ArrowLeft');
+    const back = await at(1200, 800);
+    // A red paging leg has three different causes (the list holds one image, the key never reached
+    // the viewer, the viewer moved but showed the same slide), so the reading names all three.
+    const state = await a.page.evaluate(() => {
+      const p = window.pswp;
+      return {
+        items: typeof p?.getNumItems === 'function' ? p.getNumItems() : -1,
+        curr: p ? p.currIndex : -1,
+        thumbs: document.querySelectorAll('.msg.own img.thumb').length
+      };
+    });
+    const ok =
+      !!first && !!second && !!back &&
+      first.w === 1200 && first.h === 800 &&
+      second.w === 600 && second.h === 1000 &&
+      second.src.startsWith('blob:') && second.src !== first.src &&
+      back.w === 1200 && back.src === first.src;
+    record(
+      'the preview pages between images',
+      ok ? 'PASS' : 'FAIL',
+      `first ${d(first)}; right -> ${d(second)} (blob changed=${first && second ? second.src !== first.src : 'none'}); left -> ${d(back)} (same blob as first=${first && back ? first.src === back.src : 'none'}); viewer holds ${state.items} slide(s), currIndex=${state.curr}, ${state.thumbs} thumbnail(s) in the list; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the preview pages between images with the arrow keys`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+function d(s) {
+  return s ? `${s.w}x${s.h}` : 'none';
+}
+
+/**
+ * Panning is downstream of zooming, so this is not an independent witness of the zoom module -- its
+ * value is the different signature: the zoom leg goes red on "the size did not change", this one on
+ * "the size changed and the position did not".
+ */
+async function previewPansWhenZoomed(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page
+      .locator('.composer input[type=file]')
+      .first()
+      .setInputFiles({ name: 'wide.png', mimeType: 'image/png', buffer: await bigPng(a.page, 1200, 800, '#2a8') });
+    await a.page.waitForSelector('.msg.own img.thumb', { timeout: 45000 });
+    await a.page.locator('.msg.own img.thumb').click();
+    await a.page.waitForSelector('[data-preview="image"] img', { timeout: 20000 });
+    const geom = () =>
+      a.page.evaluate(() => {
+        const img = document.querySelector('[data-preview="image"] img');
+        if (!img) return null;
+        const r = img.getBoundingClientRect();
+        return { x: Math.round(r.left), w: Math.round(r.width), natural: img.naturalWidth };
+      });
+    const fit = await geom();
+    const box = await a.page.locator('[data-preview="viewer"]').boundingBox();
+    const cx = Math.round(box.x + box.width / 2);
+    const cy = Math.round(box.y + box.height / 2);
+    await a.page.mouse.move(cx, cy);
+    await a.page.mouse.wheel(0, -600);
+    let zoomed = fit;
+    try {
+      await a.page.waitForFunction(() => {
+        const img = document.querySelector('[data-preview="image"] img');
+        return !!img && img.getBoundingClientRect().width > img.naturalWidth;
+      }, null, { timeout: 15000 });
+      zoomed = await geom();
+    } catch {
+      /* the reading below names the widths, which is what says whether the zoom ever happened */
+    }
+    const startX = zoomed ? zoomed.x : 0;
+    await a.page.mouse.down();
+    for (let x = cx; x > cx - 180; x -= 30) await a.page.mouse.move(x, cy);
+    await a.page.mouse.up();
+    try {
+      await a.page.waitForFunction(
+        ([from]) => {
+          const img = document.querySelector('[data-preview="image"] img');
+          return !!img && Math.abs(img.getBoundingClientRect().left - from) >= 40;
+        },
+        [startX],
+        { timeout: 10000 }
+      );
+    } catch {
+      /* judged below, with the delta in the reading */
+    }
+    const panned = await geom();
+    const delta = zoomed && panned ? panned.x - zoomed.x : 0;
+    // Magnification is measured against the image's own pixels, not against the fitted width: with
+    // `maxZoomLevel: 1` the wheel still grew 1080px -> 1200px, and `> fit` called that zoomed.
+    const ok = !!zoomed && !!panned && zoomed.w > (fit ? fit.natural : 0) && Math.abs(delta) >= 40;
+    record(
+      'the preview pans the zoomed image',
+      ok ? 'PASS' : 'FAIL',
+      `fit ${fit ? fit.w : 'none'}px (natural ${fit ? fit.natural : 'none'}), zoomed ${zoomed ? zoomed.w : 'none'}px (needs > ${fit ? fit.natural : 'none'}px to be magnified), then dragged: box moved ${delta}px (from x=${startX} to x=${panned ? panned.x : 'none'}); room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the preview pans the image once it is zoomed`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+/**
+ * The decrypted image must not outlive the viewer. Judged on the URL itself: live before, unfetchable
+ * after, and a second open hands out a different one -- which is what "it went back for the bytes"
+ * looks like from the page, since `fullUrl` caches by attachment.
+ */
+async function previewReleasesTheDecryptedImage(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page
+      .locator('.composer input[type=file]')
+      .first()
+      .setInputFiles({ name: 'secret.png', mimeType: 'image/png', buffer: await bigPng(a.page, 1200, 800, '#2a8') });
+    await a.page.waitForSelector('.msg.own img.thumb', { timeout: 45000 });
+    // `connect-src` carries no `blob:` (src/server/config.ts:140), so `fetch()` on an object URL is
+    // refused by the policy rather than by the release -- and loosening production CSP to make a leg
+    // pass would be the wrong fix. An `<img>` load goes through `img-src 'self' blob: data:` and
+    // answers the same question: a revoked object URL cannot be decoded.
+    const liveAt = (url) =>
+      a.page.evaluate(
+        (u) =>
+          new Promise((res) => {
+            const probe = new Image();
+            let settled = false;
+            const done = (v) => {
+              if (settled) return;
+              settled = true;
+              res(v);
+            };
+            probe.onload = () => done('load');
+            probe.onerror = () => done('error');
+            probe.src = u;
+            setTimeout(() => done('timeout'), 5000);
+          }),
+        url
+      );
+    const opened = async () => {
+      await a.page.locator('.msg.own img.thumb').click();
+      await a.page.waitForSelector('[data-preview="image"] img', { timeout: 20000 });
+      return a.page.evaluate(() => document.querySelector('[data-preview="image"] img')?.src ?? '');
+    };
+    const firstUrl = await opened();
+    const before = firstUrl.startsWith('blob:') ? await liveAt(firstUrl) : 'not-a-blob-url';
+    await a.page.keyboard.press('Escape');
+    try {
+      await a.page.waitForFunction(() => document.querySelector('[data-preview="viewer"]') === null, null, { timeout: 10000 });
+    } catch {
+      /* the close assertion below carries the state */
+    }
+    const gone = await a.page.evaluate(() => document.querySelector('[data-preview="viewer"]') === null);
+    const after = firstUrl.startsWith('blob:') ? await liveAt(firstUrl) : 'not-a-blob-url';
+    const secondUrl = await opened();
+    const ok = before === 'load' && gone === true && after === 'error' && secondUrl !== '' && secondUrl !== firstUrl;
+    record(
+      'the preview releases the decrypted image on close',
+      ok ? 'PASS' : 'FAIL',
+      `first blob while open=${before}, after close=${after}; viewer taken away=${gone}; reopening handed ${
+        secondUrl ? `${secondUrl.slice(0, 5)}…${secondUrl.slice(-4)}` : 'nothing'
+      } (different from first=${secondUrl !== firstUrl}); room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the preview releases the decrypted image when it closes`);
   } finally {
     await a.context.close();
   }
@@ -2521,6 +2740,9 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['the full-text dialog scrolls and keeps its buttons on screen', () => longMessageModalScrollsInPlace(browser, httpOrigin, emit)],
           ['the image preview is the top layer over the chat', () => imagePreviewIsTheTopLayer(browser, httpOrigin, emit)],
           ['the image preview zooms and closes on Escape', () => previewZoomsAndClosesOnEscape(browser, httpOrigin, emit)],
+          ['the preview pages between images', () => previewPagesBetweenImages(browser, httpOrigin, emit)],
+          ['the preview pans the zoomed image', () => previewPansWhenZoomed(browser, httpOrigin, emit)],
+          ['the preview releases the decrypted image on close', () => previewReleasesTheDecryptedImage(browser, httpOrigin, emit)],
           ['an open dialog does not travel with the list behind it', () => dialogStaysPutWhileTheListMoves(browser, httpOrigin, emit)],
           ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
           ['an image message has one frame, at both widths', () => imageBubbleIsTheImageItself(browser, httpOrigin, emit)],
