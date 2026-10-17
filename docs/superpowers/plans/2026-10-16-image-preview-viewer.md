@@ -39,12 +39,14 @@
 | 库会写一个全局 | 同文件 `:1903` `window.pswp = pswp` |
 | **这四个选项不存在**（第一版计划凭印象写的，已被 tsc 面提前抓到） | `maxSpreadZoom`、`modal`、`closeOnEsc`、`arrowKeyPaths` —— 逐个查过 `PreparedPhotoSwipeOptions`，全部没有 |
 | 真正的缩放上限 | `maxZoomLevel`（`photoswipe.d.ts:227`，类型 `ZoomLevelOption`）；另有 `initialZoomLevel:225`、`secondaryZoomLevel:226` |
-| ESC / 方向键**没有开关选项** | 它们由 Keyboard 模块无条件处理（`photoswipe.esm.js:3101-3104` 的 `KeyboardKeyCodesMap` 含 `Escape`/`ArrowLeft`），要关只能关模块 |
-| 模块开关确实存在 | `zoom`、`keyboard`、`gestures`、`ui` 四个都在选项表里 —— 缩放与平移分别住在 `zoom`/`gestures` 模块内 |
+| ESC / 方向键**没有开关选项** | 它们由 Keyboard 模块无条件处理（`photoswipe.esm.js:3101-3104` 的 `KeyboardKeyCodesMap` 含 `Escape`/`ArrowLeft`），要关只能关模块 —— **而模块关不掉**，见下一行 |
+| ~~模块开关确实存在~~ **已被 5.4.4 否证**（执行时实测，不是推断） | 核心**无条件**构造：`this.gestures = new Gestures(this)`（`:6588`）、`this.keyboard = new Keyboard(this)`（`:6590`）、`this.ui = new UI(this)`（`:7031`）。`zoom` / `keyboard` / `gestures` / `ui` 四个选项在 5.4.4 里**没有任何执行者**：写 `keyboard: false` 之后 ESC 照样关闭（读数见 TEST-REPORT §7.13）。真正的开关是行为级的：`wheelToZoom`（`:3727`）、`arrowKeys`（`:3249`，默认 `true` 在 `:6491`）、`maxZoomLevel`、`doubleTapAction` |
+| `appendToEl` 的库默认**就是** `document.body` | `photoswipe.esm.js:7034`：`(this.options.appendToEl || document.body).appendChild(this.element)` ⇒ "删掉这个选项"是**等价变异**，那条腿不可能因此变红；把默认改指到 `.list` 才会红（两把都已实测） |
+
 
 ⇒ 适配器必须用一个交叉类型把 `appendToEl` 合法地传进去，否则 tsc 拦下（运行时本来是通的，这是**类型面的缺口**，不是能力缺口）。
 
-⇒ `zoom: true` 与 `gestures: true` 要**显式写**：模块不起就没有缩放与平移，而这正是本功能的全部诉求；靠默认值等于把功能押在别人发版上。
+⇒ ~~`zoom: true` 与 `gestures: true` 要显式写：模块不起就没有缩放与平移~~ **这条在 5.4.4 不成立**（执行时实测）：核心无条件 `new Gestures(this)` / `new Keyboard(this)` / `new UI(this)`，这四个选项没有执行者，写与不写都不改变行为 —— 所以它们**不是**证人，只是意图声明。真正的开关是 `wheelToZoom`、`arrowKeys`、`maxZoomLevel`、`doubleTapAction`，四个都已各自下过刀。
 
 ---
 
@@ -371,15 +373,17 @@ git commit -m "feat(chat): a real image viewer, with the library DOM behind one 
 
 | 腿 | 判据（渲染后几何） | 刀 |
 | --- | --- | --- |
-| `the preview outranks the chat it came from`（既有，改指新 DOM） | 预览容器 `parentElement === document.body`；中心像素 `elementFromPoint` 命中查看器的图 | 去掉 `appendToEl` ⇒ 红（这一刀同时是 spec §2.4 的证人） |
-| `the preview zooms` | 打开后读缩放比例 `a`，滚轮上滚 ⇒ 读到 `b`，判 `b > a`；再下滚 ⇒ 判回落 | `zoom: false`（关掉 Zoomable 模块）⇒ 红 |
-| `the preview pans when zoomed` | 放大后拖拽中心 ⇒ 图像包围盒左移 ≥40px | `maxZoomLevel: 1` ⇒ 红。**但这一刀同时会让上一条红** —— 见下方"刀的重叠" |
-| `the preview closes on Escape and pages on arrows` | 按 ArrowRight ⇒ 命中的 `src` 变成第二张；按 Escape ⇒ 预览消失 | `keyboard: false` ⇒ 两半一起红（ESC 与方向键同住 Keyboard 模块，没有各自的开关） |
-| `the preview releases the decrypted image on close` | 关闭后 `fullUrl` 的 blob 已被 revoke：再取同一 id 会走一次重新解密路径 | 摘掉 `onClose` 里的 `dropFull` ⇒ 红（**唯一一把与库无关的刀**） |
+| `the preview outranks the chat it came from`（既有，改指新 DOM） | 预览容器 `parentElement === document.body`；中心像素 `elementFromPoint` 命中查看器的图 | ~~去掉 `appendToEl` ⇒ 红~~ **等价变异**（库默认就是 body，`:7034`）。改指 `.list` ⇒ 红：`portal to body=false`，已实测 |
+| `the preview zooms` | 打开后读缩放宽度 `a`，滚轮上滚 ⇒ 读到 `b`，判 **`b > 原图自然宽`**（原写法 `b > a` 太弱：`maxZoomLevel: 1` 下 1080→1200 也"变大"，实测到） | ~~`zoom: false`~~ **无执行者**。真刀 `wheelToZoom: false` ⇒ 红：`1080px at fit, 1080px after wheel-up`，已实测 |
+| `the preview pans when zoomed` | 放大后拖拽中心 ⇒ 图像包围盒移动 ≥40px，**且**放大后的宽度须超过自然宽 | `maxZoomLevel: 1` ⇒ 红。**这一刀同时会让上一条红** —— 见下方"刀的重叠" |
+| `the preview pages between images`（拆出来单独一条） | ArrowRight ⇒ 命中的 `src` 变成第二张且解码尺寸是第二张的（两张夹具**尺寸也不同**，否则互比可以空对空绿）；ArrowLeft ⇒ 回到第一张的**同一个** blob | `arrowKeys: false` ⇒ 红：`right -> 1200x800 (blob changed=false)`，且读数自带 dump `viewer holds 2 slide(s), currIndex=0`（分辨"只有一张"与"键没到"）|
+| ESC 关闭（并进 `the preview zooms` 那条腿的另一半） | 按 Escape ⇒ `[data-preview="viewer"]` 从 DOM 消失 | **没有任何产品侧的刀**：ESC 由 Keyboard 模块无条件实现（`:6590` 无条件构造、`:3206` 处理 Escape），`keyboard: false` 实测**照样绿** ⇒ 这一半只是升级证人；"关闭真的接回我们自己的代码"由下一条腿证 |
+| `the preview releases the decrypted image on close` | 关闭后旧 blob URL **解码失败**（判据只能挂 `img.onload/onerror`：`connect-src` 不含 `blob:`，`src/server/config.ts:140`，`fetch` 会被 CSP 拒绝而不是被释放拒绝）；再开给出**另一个** URL | 摘掉清理里的 `dropFull` ⇒ 红：`after close=load`，已实测。**唯一一把与库无关的刀** |
 
 **刀的重叠，说清楚而不是假装没有**：平移是缩放的下游 —— 没放大的图不能平移，所以任何让"放大不了"的刀都会连带把缩放腿也弄红。
-这两条腿因此**不是两个独立证人**，它们的价值在**签名不同**：缩放腿红在"比例没变"，平移腿红在"比例变了、位置没变"。
-只有 `appendToEl`、`zoom: false`、`keyboard: false`、`dropFull` 摘除这四把是各自独立的。
+这两条腿因此**不是两个独立证人**，它们的价值在**签名不同**：缩放腿红在"没超过自然宽"，平移腿红在"根本没放大"。
+`maxZoomLevel: 1` 实测同时红这两条、另外三条绿（`pages` / `releases` / `top layer`），那三条绿就是"台面还活着"的对照。
+各自独立的刀一共四把：`appendToEl` 改指 `.list`、`wheelToZoom: false`、`arrowKeys: false`、`dropFull` 摘除。
 
 - [ ] **Step 2: ESC 与"点图不再误关"两条行为并进 `the preview zooms` 的判据里**（现状那两个是真缺陷：ESC 不存在、点图片本身会关闭）
 

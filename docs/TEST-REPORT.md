@@ -703,3 +703,77 @@ dev 控制台那条 `eval()` 报错（CSP 只在 `NODE_ENV=development` 那一�
 （`46px before, 366px after, the last one on screen=false`），同刀的 `scratch/knife3-pinned.log` 因上一条所说
 不做归因。整台面 16 道门的重认证按收尾顺序（文档 → 提交 → 打包 → 一遍台面）记在 v1.0.1 标签注解里。
 
+### 7.13 第七轮：图片查看器，以及上一轮那四把空枪（2026-10-17）
+
+**先说必须先说的：上一轮记在案的四把预览刀（K1~K3、K2b）一把都没落到产物上。** 按 scratch/ 的 mtime：
+
+| 时刻 | 事件 |
+| --- | --- |
+| 08:16:50 | `build-preview2.log` —— 最后一次带功能的重建（`.next` 就是这一份） |
+| 08:18:54 | 两条预览腿绿 |
+| 08:20:14 ~ 08:21:17 | K1 去 `appendToEl`、K2 `zoom:false`、K2b 去 `wheelToZoom`、K3 `keyboard:false` |
+| 08:21:38 | `.next/BUILD_ID` 才被 `build-restore.log` 那一次改写 |
+
+`run-browser-tests.mjs:2416` 只检查 `dist/server/server.js` 在不在，**它自己不编译** —— 所以那四把改的是
+源码，跑的是 08:16:50 那份没被变异的产物。K1/K2/K3 的"绿"不算证，K2b 那次红也不算刀有牙（同一份产物
+不可能因为源文件的不同而给出不同读数，那次红是滚轮那一发的抖动）。本轮全部重下，**每把刀之前先
+`next build` 并把 build 日志与腿日志同前缀存下**（`knife-*-build.log` + `knife-*.log`）。
+
+**本轮 5 条预览腿的绿读数**（`scratch/lane-33a.log`：33 条腿 × 两个来源 = 66 行全 PASS，`LANE_EXIT=0`，
+无 FAIL、无 SKIP）：
+
+| 腿 | 绿读数 |
+| --- | --- |
+| 预览压在它来的那段聊天之上 | `portal to body=true; the centre pixel resolves inside the preview=true (hit div.pswp__img) with 2 list rows mounted` |
+| 滚轮缩放 + ESC 关闭 | `natural 1200px; displayed 1080px at fit, 2481px after wheel-up (must exceed 1200px of natural to count as magnification); viewer gone after Escape=true` |
+| 方向键在两张图之间翻页 | `first 1200x800; right -> 600x1000 (blob changed=true); left -> 1200x800 (same blob as first=true); viewer holds 2 slide(s), currIndex=0, 2 thumbnail(s) in the list` |
+| 放大之后能拖着平移 | `fit 1080px (natural 1200), zoomed 2481px (needs > 1200px to be magnified), then dragged: box moved -120px (from x=-601 to x=-721)` |
+| 关闭即释放解开的原图 | `first blob while open=load, after close=error; viewer taken away=true; reopening handed blob:…147a (different from first=true)` |
+
+**每条腿各自的刀**（各自单独下、各自重建、各自看到红，再放回）：
+
+| 刀 | 落的腿 | 红的读数 |
+| --- | --- | --- |
+| 摘掉清理里的 `dropFull(id)` | releases | `first blob while open=load, after close=load; reopening handed blob:…eb7b (different from first=false)`（`knife-A.log`） |
+| `arrowKeys: false` | pages | `right -> 1200x800 (blob changed=false) … viewer holds 2 slide(s), currIndex=0`（`knife-B.log`）—— dump 直接分开了"只有一张"与"键没到" |
+| `wheelToZoom: false` | zooms | `displayed 1080px at fit, 1080px after wheel-up; viewer gone after Escape=true`（`knife-D-...log`）—— 缩放那一半红，ESC 那一半照绿 |
+| `maxZoomLevel: 1` | zooms + pans | 两条同时红：`1200px after wheel-up (must exceed 1200px)` 与 `zoomed 1080px (needs > 1200px)`（`knife-E2-...log`），**另外三条在同一遍里照绿** ⇒ 台面活着的对照 |
+| `appendToEl` 改指 `.list` | top layer | `portal to body=false; the centre pixel resolves inside the preview=true`（`knife-F-append-to-list.log`） |
+
+**两把"下下去是绿的"刀，是本轮最有用的读数，不是两次失败**：
+
+1. `keyboard: false` ⇒ 那条腿**整条绿**（`viewer gone after Escape=true`）。原因在包里：5.4.4 的核心
+   **无条件** `new Gestures(this)`（`photoswipe.esm.js:6588`）、`new Keyboard(this)`（`:6590`）、
+   `new UI(this)`（`:7031`），ESC 在 `:3206` 被处理，**没有任何开关**。⇒ 计划事实表里"模块开关确实存在"
+   与"`zoom: true` / `gestures: true` 要显式写，模块不起就没有缩放与平移"两句都被否证，已就地改正；
+   这四处显式写法只是意图声明，**不许当证人**。
+2. 删掉 `appendToEl` ⇒ 那条腿**整条绿**。库默认就是 body：`(this.options.appendToEl || document.body)`
+   （`:7034`）。⇒ "删掉这个选项"是**等价变异**，spec §2.4 那句"显式传，不赌库的默认值"由这条腿**证不到**；
+   它证的是结果（预览确实挂在 body 下），而结果确实是要守的东西。两把都记在这里，而不是只记红的那几把。
+
+**一把刀顺带抓出判据本身太弱**：`maxZoomLevel: 1` 那一遍，缩放腿**读着 1080→1200 就绿了** —— 因为判据
+写的是"比拟合宽更大"。而 1x 上限下 1200px 原图从拟合的 1080px 长到自己的自然宽，本来就不算放大。
+改成 `zoomed.w > natural` 之后同一把刀立刻红（上表）。平移腿同样加了这条前置（否则"没放大也能被拖走
+102px"那一格会自己蒙过去 —— 那是库的拖拽摩擦，不是功能）。
+
+**刀的重叠，实测而不是引用计划**：`maxZoomLevel: 1` 同时红缩放与平移两条 ⇒ 这两条**不是两个独立证人**，
+分辨只靠签名（"没超过自然宽" vs "根本没放大"）。各自独立的刀一共四把：`appendToEl` 改指、
+`wheelToZoom: false`、`arrowKeys: false`、`dropFull` 摘除。
+
+**看像素**（`scratch/preview-shot7.mjs` → `scratch/shots7/`，七张：桌面 list/fit/zoomed/paged + 手机
+list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机双击把 420px 视口里的图放到自然宽 1200px
+且顶栏出现"缩小"那颗 —— 都在像素里成立。**像素抓到而判据没抓到的**：`bgOpacity: 0.92` 的遮罩下，
+页眉那行房间 ID 仍然可读。这不是泄露（是本机自己的房间、自己的屏幕），但"预览层该不该把底下的字
+透出来"目前没有任何判据规定，记在这里。
+
+**量具自己的一次假证据，顺带抓到一句会说谎的文案**：探针第一版把 `data:image/png;base64,` 前缀整个塞进
+`Buffer.from(..., 'base64')` ⇒ 上传的是垃圾字节，而两行图片位回的是
+`{"placeholders":["密文认证失败，已拒绝渲染","密文认证失败，已拒绝渲染"],"queue":[]}`。
+① 夹具坏了（腿里的 `bigPng` 一直是对的，它 `split(',')[1]`）；② **那句文案在说谎**：`thumbnailUrl`
+对任何非 `DecryptError` 的失败（`createImageBitmap` 解不开、canvas 拿不到 2d 上下文）都返回 `null`，
+而 `ImageBody` 把 `null` 也渲染成"密文认证失败，已拒绝渲染" —— 认证根本没失败。登记为 D36。
+
+台面计数：本轮之后浏览器线 **33 条腿**（`scratch/lane-33a.log`）。本轮的树：产品改动在
+`752d6a8` 之后继续（多图 dataSource、`PreviewHost.tsx`、`cachedThumb`、`data-preview` 唯一化），
+所有读数都跑在 `scratch/build-preview-clean.log` 那一次编译之上；刀各自的产物见上表的 build 日志。
+

@@ -9,6 +9,38 @@ where a skip is never a pass, plus mutation evidence for each new judgement (the
 deliberately broken and the gate had to go red). Readings live in `docs/TEST-REPORT.md`, unmet
 claims in `docs/DEBT.md`.
 
+## Unreleased
+
+### Added
+
+- Images now open in a real viewer: wheel / double-tap / pinch zoom, drag to pan, paging through the
+  room's images with the arrow keys or a swipe, and Escape to close. PhotoSwipe 5.4.4 (MIT, zero
+  transitive dependencies) sits behind one adapter — `src/components/ImagePreview.tsx` is the only
+  file in the front end that touches its DOM, and the browser judgements read only the two
+  `data-preview` hooks that adapter stamps, never a library class name.
+- The attachment metadata carries the original pixel size, read once on the client before upload, so
+  the viewer knows the frame before the pixels arrive instead of re-measuring the row when they do.
+- Three browser legs: paging between two images of different sizes, panning a zoomed image, and
+  releasing the decrypted image on close. The release leg probes the object URL with an `<img>`
+  decode rather than `fetch`, because `connect-src` carries no `blob:`.
+
+### Changed
+
+- The artifact dependency check (gate B2) derives its expected list from the `dependencies` of the
+  `package.json` inside the staged artifact. The hand-copied list could only ever complain about the
+  names someone remembered to add, so a new runtime dependency that never reached the package passed.
+
+### Fixed
+
+- Clicking the image itself used to close the preview: the old overlay's close button had no handler
+  of its own, so the only way out was a click anywhere — including on the picture.
+- `[data-preview="image"]` could end up stamped on more than one of the viewer's three reused slide
+  holders, which made a completed page turn read as "nothing changed" — the stale holder stays first
+  in document order. The adapter now keeps that hook on exactly one node.
+- The zoom judgement compared the zoomed width against the *fitted* width. With the zoom capped at
+  1x, a 1200px image still grew from 1080px to 1200px and the leg called that magnification; the
+  judgement is now against the image's own pixel width.
+
 ## 1.0.1 — 2026-10-16
 
 Everything here came out of using the app in a browser, not out of the specification.

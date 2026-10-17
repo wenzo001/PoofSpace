@@ -123,6 +123,16 @@ nonce = 版本(1) ‖ slot(3) ‖ gen(2) ‖ counter(6)
 
 聊天室顶部只有一颗锁图标：桌面悬停、移动点击才出现文案，HTTPS 与 HTTP 各一段（逐字写在 `scripts/run-browser-tests.mjs` 的 `HTTPS_COPY` / `HTTP_COPY`，并由台面逐字比对）。加密初始化失败、随机数不可用或密文认证异常时，锁不再是重点——发送会被挡住并给明确错误。首页不重复讲这些。
 
+## 6.1 第三方 DOM 只出现在一个文件里
+
+图片查看器是 PhotoSwipe 5.4.4（MIT、`dependencies: {}` 零传递依赖）。**整个前端只有
+`src/components/ImagePreview.tsx` 允许碰它的 DOM**：库自己的 class（`pswp__img` 那一族）不出现在这个
+文件之外，浏览器判据只认适配器打上去的 `data-preview="viewer"` / `data-preview="image"` 两个钩子。
+分工刻意切成三层：`ImagePreview.tsx` 只管"库长什么样、事件什么时候发"；`PreviewHost.tsx` 只管"哪几张
+原图在内存里、什么时候 `dropFull`"；`RoomView.tsx` 只管"按 `seq` 给出这一串附件 id"。
+查看器因此住在列表之上而不是某条消息里 —— 一行带 `transform`，长在行里的浮层会被关进行自己的层叠
+上下文，那是 §6 之前修过的坑；而翻页时读者可能早就把那一行滚走了，解密的引用计数不能跟着行一起没。
+
 ## 7. 限制与背压
 
 来自 `src/lib/constants.ts`，全部可用环境变量收紧（不能放宽过硬上限）：节点房间数 `maxRoomsDefault = 20`（`MAX_ROOMS`，硬顶 1000）、每房间 100 人（`MAX_PARTICIPANTS_PER_ROOM`，硬顶 500）、恢复窗口 `roomIdleTtlSeconds = 300`、单条明文 `textPlaintextBytes`、分片 `chunkBytesMax = 4 MiB`、单附件 `attachmentBytesMax = 256 MiB`、房间附件总额 `2 GiB`、**全节点**临时额度 `tempBytesMaxNode = 20 GiB`、每人未完成上传额度 `pendingUploadsPerMember = 8`、心跳 15 s（宽限 60 s = 4 个 ping 周期，不能小于 3 个）、槽位宽限 45 s、连接闸门 `connectionsNodeMax = 4000` / `connectionsPerIpMax = 512`。
