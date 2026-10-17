@@ -132,16 +132,37 @@ function pm2Bin() {
  * exit code next to it instead of printing a bare FAIL. The crash still counts as FAIL: a lane that
  * ran no test is never a pass.
  */
+function countProcesses(image) {
+  const r = spawnSync('tasklist', ['/NH', '/FI', `IMAGENAME eq ${image}`], { encoding: 'utf8' });
+  if (r.error) return `?(${String(r.error.message).slice(0, 40)})`;
+  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  return String((out.match(new RegExp(image.split('.').join('\\.'), 'gi')) || []).length);
+}
+
 function machineOccupancy() {
-  const count = (image) => {
-    const r = spawnSync('tasklist', ['/NH', '/FI', `IMAGENAME eq ${image}`], { encoding: 'utf8' });
-    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
-    if (r.error) return `?(${String(r.error.message).slice(0, 40)})`;
-    return String((out.match(new RegExp(image.split('.').join('\\.'), 'gi')) || []).length);
-  };
   const free = Math.round(os.freemem() / 1048576);
   const total = Math.round(os.totalmem() / 1048576);
-  return `node=${count('node.exe')} chrome=${count('chrome.exe')} memFreeMiB=${free}/${total}`;
+  return `node=${countProcesses('node.exe')} chrome=${countProcesses('chrome.exe')} memFreeMiB=${free}/${total}`;
+}
+
+/**
+ * D26's prescribed next step, taken: the perf lane has crashed in-table (`0 files, 0 tests`,
+ * `ERR_IPC_CHANNEL_CLOSED`) while passing alone, and the table's own probe showed the difference --
+ * chromium left alive by the browser lane that runs just before it (`chrome=8`, `chrome=9` on the
+ * crashing passes, `chrome=0` on the green ones). A perf lane that starts with someone else's
+ * browsers on the machine is not measuring the product, so the table now waits for them to go and
+ * prints what it waited to. It never turns a crash into a pass.
+ */
+function waitForBrowsersToExit(budgetMs = 120_000) {
+  const started = Date.now();
+  const nap = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  let chrome = countProcesses('chrome.exe');
+  while (/^\d+$/.test(String(chrome)) && Number(chrome) > 0 && Date.now() - started <= budgetMs) {
+    nap(2000);
+    chrome = countProcesses('chrome.exe');
+  }
+  const waited = Date.now() - started;
+  return `chrome=${chrome} waitedMs=${waited}${waited > budgetMs ? ' (budget exhausted; this is what the lane started with)' : ''}`;
 }
 
 function readBuildInfo() {
@@ -428,13 +449,14 @@ const GATES = [
     title: 'performance lane: 100 members, broadcast, reconnect churn, upload alongside text, no growth',
     spec: '正文 十一 性能 / 十',
     run: () => {
+      const settled = waitForBrowsersToExit();
       const before = machineOccupancy();
       const r = vitest(LANES.T4, 25 * 60_000, ['--no-file-parallelism']);
       const after = machineOccupancy();
       const s = summarise(r.out);
       return {
         status: r.code === 0 && !s.failed && s.tests > 0 ? 'PASS' : 'FAIL',
-        evidence: `machine before[${before}] after[${after}] exit=${r.code}; ${s.files} files, ${s.tests} tests${s.failed ? ' with failures' : ''}: ${s.tail}`
+        evidence: `browsers before lane[${settled}]; machine before[${before}] after[${after}] exit=${r.code}; ${s.files} files, ${s.tests} tests${s.failed ? ' with failures' : ''}: ${s.tail}`
       };
     }
   },

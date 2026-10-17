@@ -905,6 +905,14 @@ pack 清单里去掉（等价于"声明了但打包器没搬进去"，也正是�
 本轮认证的是"延迟销毁这 15 条判据 + 10 把刀 + 35 条腿里与本轮相关的每一条各自绿"。
 下一遍（`scratch/gates-BB.log`，同一份源码、只隔一次文档重打包）是 **16 / 0 / 0**，D27 那一条没有红；
 两遍都记在这里，因为**"哪一遍跑在哪个包上"是历史事实，而"本文档所在那个包的最终读数"会被下一次重打包改掉** ——
-后者按 §7.13 的口径进注解标签，不进随包报告。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+后者按 §7.13 的口径进注解标签，不进随包报告。
+
+**再一遍（`scratch/gates-CC.log`）掉到 14 / 2 / 0，两条红的归因**：T5 里 `pinned list holds on incoming`
+（D27 老签名 `neverms`）与 `a file card keeps its name, size and button in place`（`waitFor` 超时，D20 那一族）；
+T4 这一遍**也**崩了，而它自己打印的读数是决定性的一条：`machine before[node=10 chrome=8 …]` ——
+**开局就有 8 个 chromium 残留**，正是 D26 记的"绿的两遍 chrome=0、崩的几遍 chrome=8/9"。
+⇒ 按 D26 写好的下一步动手：台面现在在 T4 之前等浏览器退干净并把等到的数打进读数
+（`waitForBrowsersToExit`，上限 120 s）。单跑 T4 的第一次实读：`browsers before lane[chrome=0 waitedMs=24240]`
+—— 确实等到 24 秒才归零，随后 **9 条全绿**。D26 的根因仍未定位，状态照旧 OPEN。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 
