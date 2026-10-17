@@ -75,7 +75,8 @@ export default function DelayDialog({ client, onClose }: { client: RoomClient; o
           <button
             key={t.ms}
             type="button"
-            className="btn btn-ghost delay-tier"
+            className={t.ms === current ? 'btn btn-ghost delay-tier is-current' : 'btn btn-ghost delay-tier'}
+            aria-pressed={t.ms === current}
             data-delay-tier={String(t.ms / H)}
             disabled={busy}
             onClick={() => void choose(t.ms, t.label)}

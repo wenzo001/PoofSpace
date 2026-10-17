@@ -862,6 +862,22 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
 `0px before, 0px after, 末行在屏内=true`，pinned 腿本轮台面里也是绿的。
 ⇒ 新证据只支持"这三条在整跑负载下一起抖"，不支持任何一条产品缺陷；也没有为此调过任何预算。
 两条新腿在同一遍里各自绿：`the identity pill centers its content`（wide L12/R12/T7/B7、narrow 44×44 全 7px）
-与 `the creator can arm a delayed destroy`（peer open=0/tiers=0、6 档 211×44、标签逐字对）。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+与 `the creator can arm a delayed destroy`（peer open=0/tiers=0、6 档 211×44、标签逐字对）。
+
+**按 spec §10 的清单回头补的三项**（审计时逐条对表发现的缺口，不是顺手加的）：
+
+1. **"当前档高亮"本来没实现** —— spec §10 浏览器表写着"弹窗档位齐全、**当前值高亮**、触摸目标 ≥44pt"，
+   第一版只有上面那行文字状态。补 `.delay-tier.is-current`（`--teal-line`/`--teal-bg`/`--teal`，无新色字面量）
+   与 `aria-pressed`，判据比的是**计算后的 border 颜色**而不是 class 名 —— 因为"挂了类但没有规则"正是
+   `static-gate-must-name-the-binding-declaration` 那一族。绿读数：`highlighted tier "8 小时" x1
+   border rgba(151,241,227,0.216) vs unselected rgba(255,255,255,0.12)`；取消之后 `0 highlighted`。
+   刀：删掉那条 CSS 规则 ⇒ 该腿红（class 还在，边框一样）。
+2. **spec 点名的四把刀之前没下**，本轮补完，每把只红它该红的那几条：
+   `effectiveIdleTtlMs` 改成恒返回全局值 ⇒ 生命周期线 **3 红 3 绿**（1/3/4 是装填过的）；
+   join 那处不清零 ⇒ **1 红**（第 4 条）；取消条件从"IDLE_GRACE 时"放宽成"任何 join" ⇒ **1 红**（第 5 条，
+   ACTIVE 期装填被误作废）；把 `v === 2` 分支那一跳摘掉 ⇒ 存储线 **1 红 1 绿**（v2 那条红在
+   `to include 'idle_delay_ms'`，v1 那条照绿 —— 与上一轮"v1 分支摘一跳"配成两半）。
+3. **"第 N+1 次装填被拒且文案不含数字"这一半没有判据** ⇒ 登记为 D41：现在只钉了返回码
+   `DELAY_CAPACITY_FULL`，用户界面那句 `服务器拒绝了这次设置` 没有任何东西在读它有没有数字。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 

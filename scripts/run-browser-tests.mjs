@@ -2252,6 +2252,21 @@ async function creatorCanArmADelayedDestroy(browser, origin, emit) {
     await a.page.waitForSelector('[data-delay="note"]', { timeout: 20000 });
     const note = String(await a.page.locator('[data-delay="note"]').textContent());
     const current = String(await a.page.locator('[data-delay="current"]').textContent());
+    // The armed tier has to be recognisable from its own rendering, not only from the sentence
+    // above it: compare the computed border against an unselected tier so a class that no rule
+    // actually styles cannot pass.
+    const highlight = await a.page.evaluate(() => {
+      const tiers = [...document.querySelectorAll('.delay-tier')];
+      const on = tiers.filter((t) => t.getAttribute('aria-pressed') === 'true');
+      const off = tiers.find((t) => t.getAttribute('aria-pressed') !== 'true');
+      const one = on[0];
+      return {
+        count: on.length,
+        label: one ? (one.textContent ?? '').trim() : null,
+        border: one ? getComputedStyle(one).borderTopColor : '',
+        offBorder: off ? getComputedStyle(off).borderTopColor : ''
+      };
+    });
     await a.page.locator('[data-delay="clear"]').click();
     await a.page.waitForFunction(
       () => (document.querySelector('[data-delay="current"]')?.textContent ?? '').includes('未设置'),
@@ -2259,6 +2274,9 @@ async function creatorCanArmADelayedDestroy(browser, origin, emit) {
       { timeout: 20000 }
     );
     const cleared = String(await a.page.locator('[data-delay="current"]').textContent());
+    const clearedHighlight = await a.page.evaluate(() =>
+      [...document.querySelectorAll('.delay-tier')].filter((t) => t.getAttribute('aria-pressed') === 'true').length
+    );
 
     // The labels are the six strings the dialog is supposed to show, written here rather than
     // derived from the component: a tier list that drifts has to be edited in two places on purpose.
@@ -2267,11 +2285,13 @@ async function creatorCanArmADelayedDestroy(browser, origin, emit) {
       peerOpen === 0 && peerSeesArming === 0 &&
       geom.count === 6 && geom.minH >= 44 && geom.minW >= 44 && geom.closeInside &&
       geom.labels.join('|') === wantLabels.join('|') &&
-      /已设为 8 小时/.test(note) && /当前：8 小时/.test(current) && /未设置/.test(cleared);
+      /已设为 8 小时/.test(note) && /当前：8 小时/.test(current) && /未设置/.test(cleared) &&
+      highlight.count === 1 && highlight.label === '8 小时' &&
+      highlight.border !== highlight.offBorder && clearedHighlight === 0;
     record(
       'the creator can arm a delayed destroy',
       ok ? 'PASS' : 'FAIL',
-      `peer sees open=${peerOpen} and tiers=${peerSeesArming}; creator sees ${geom.count} tiers min ${geom.minW}x${geom.minH}px, 关闭 inside the dialog=${geom.closeInside}, labels=[${geom.labels.join(' ')}]; arming 8h read back "${current.trim()}" (note "${note.trim()}"); after clear "${cleared.trim()}"; room ${roomId.slice(0, 6)}`
+      `peer sees open=${peerOpen} and tiers=${peerSeesArming}; creator sees ${geom.count} tiers min ${geom.minW}x${geom.minH}px, 关闭 inside the dialog=${geom.closeInside}, labels=[${geom.labels.join(' ')}]; arming 8h read back "${current.trim()}" (note "${note.trim()}"); highlighted tier "${highlight.label}" x${highlight.count} border ${highlight.border} vs unselected ${highlight.offBorder}; after clear "${cleared.trim()}" with ${clearedHighlight} highlighted; room ${roomId.slice(0, 6)}`
     );
     emit(`${ok ? 'PASS' : 'FAIL'} the room owner can arm and clear a longer recovery window`);
   } finally {

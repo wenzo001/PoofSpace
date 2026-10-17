@@ -14,7 +14,9 @@ claims in `docs/DEBT.md`.
 ### Added
 
 - The room owner can arm a one-time longer recovery window for the next absence: 4/8/12/24/36/72
-  hours, chosen from a `延时` button in the room header that only the creator sees. Anyone returning
+  hours, chosen from a `延时` button in the room header that only the creator sees. The armed tier is
+  highlighted (`aria-pressed` plus a teal border, tokens only), so reopening the dialog answers
+  "what did I set?" without reading a sentence. Anyone returning
   during the countdown cancels it *and consumes the arming*, so this is a promise about the next
   absence rather than a permanent setting. `MAX_DELAYED_ROOMS` (default 5, validated `0..MAX_ROOMS`,
   `0` = feature off) caps how many rooms on a node hold one at a time; armed rooms keep counting

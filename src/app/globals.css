@@ -311,6 +311,14 @@ a {
   min-height: var(--tap);
 }
 
+/* The armed tier has to be recognisable without reading the sentence above it -- the dialog is
+   reopened to check a choice, not to make a new one. */
+.delay-tier.is-current {
+  border-color: var(--teal-line);
+  background: var(--teal-bg);
+  color: var(--teal);
+}
+
 .me .name {
   font-size: var(--fs-md);
   color: var(--body);
