@@ -1020,27 +1020,6 @@ a {
   border-radius: 0;
 }
 
-.lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: var(--overlay);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-3);
-  padding: var(--s-4);
-}
-
-.lightbox img {
-  max-width: 100%;
-  max-height: calc(100dvh - 96px);
-  border-radius: var(--r-sm);
-  object-fit: contain;
-  background: var(--card-2);
-}
-
 /* file message */
 
 .file {
@@ -1320,12 +1299,6 @@ a {
 
 .icon-btn[data-perm='denied'] {
   color: var(--mute);
-}
-
-.lightbox .icon-btn {
-  color: var(--body);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-pill);
 }
 
 /* ============================================================ 2026-10-16 精修

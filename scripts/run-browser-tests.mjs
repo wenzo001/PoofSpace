@@ -1827,9 +1827,9 @@ async function imagePreviewIsTheTopLayer(browser, origin, emit) {
     await a.page.keyboard.press('Enter');
     await a.page.waitForSelector('.bubble', { timeout: 30000 });
     await a.page.locator('.msg.own img.thumb').click();
-    await a.page.waitForSelector('.lightbox', { timeout: 20000 });
+    await a.page.waitForSelector('[data-preview="viewer"]', { timeout: 20000 });
     const g = await a.page.evaluate(() => {
-      const lb = document.querySelector('.lightbox');
+      const lb = document.querySelector('[data-preview="viewer"]');
       if (!lb) return { present: false };
       const r = lb.getBoundingClientRect();
       const hit = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(window.innerHeight / 2));
@@ -1848,6 +1848,71 @@ async function imagePreviewIsTheTopLayer(browser, origin, emit) {
       `portal to body=${g.onBody}; the centre pixel resolves inside the preview=${g.covers} (hit ${g.hit}) with ${g.rows} list rows mounted; room ${roomId.slice(0, 6)}`
     );
     emit(`${ok ? 'PASS' : 'FAIL'} the image preview outranks the chat it came from`);
+  } finally {
+    await a.context.close();
+  }
+}
+
+/** 64x64 is too small to mean anything to a zoom control: the viewer would be upscaling from the
+ *  first frame. This draws the size a screenshot actually arrives at. */
+async function bigPng(page, w, h, color) {
+  const dataUrl = await page.evaluate(
+    ([width, height, fill]) => {
+      const c = document.createElement('canvas');
+      c.width = width;
+      c.height = height;
+      const g = c.getContext('2d');
+      if (!g) return '';
+      g.fillStyle = fill;
+      g.fillRect(0, 0, width, height);
+      g.fillStyle = '#fff';
+      g.fillRect(20, 20, Math.round(width / 3), Math.round(height / 3));
+      return c.toDataURL('image/png');
+    },
+    [w, h, color]
+  );
+  return Buffer.from(String(dataUrl).split(',')[1] ?? '', 'base64');
+}
+
+/**
+ * The ask was "zoom in and out, and the usual preview operations". Measured on rendered geometry:
+ * the displayed width must grow under the wheel, and Escape must take the viewer away -- neither of
+ * which the hand-rolled overlay could do (it had no zoom and no key handler at all).
+ */
+async function previewZoomsAndClosesOnEscape(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    await a.page
+      .locator('.composer input[type=file]')
+      .first()
+      .setInputFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: await bigPng(a.page, 1200, 800, '#2a8') });
+    await a.page.waitForSelector('.msg.own img.thumb', { timeout: 45000 });
+    await a.page.locator('.msg.own img.thumb').click();
+    await a.page.waitForSelector('[data-preview="image"] img', { timeout: 20000 });
+    const measure = () =>
+      a.page.evaluate(() => {
+        const img = document.querySelector('[data-preview="image"] img');
+        if (!img) return null;
+        return { w: Math.round(img.getBoundingClientRect().width), natural: img.naturalWidth || 0 };
+      });
+    const fit = await measure();
+    const box = await a.page.locator('[data-preview="viewer"]').boundingBox();
+    await a.page.mouse.move(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+    await a.page.mouse.wheel(0, -600);
+    await new Promise((r) => setTimeout(r, 600));
+    const zoomed = await measure();
+    await a.page.keyboard.press('Escape');
+    await new Promise((r) => setTimeout(r, 700));
+    const gone = await a.page.evaluate(() => document.querySelector('[data-preview="viewer"]') === null);
+    const ok = !!fit && !!zoomed && fit.natural === 1200 && zoomed.w > fit.w && gone === true;
+    record(
+      'the image preview zooms and closes on Escape',
+      ok ? 'PASS' : 'FAIL',
+      `natural ${fit ? fit.natural : 'none'}px; displayed ${fit ? fit.w : 'none'}px at fit, ${zoomed ? zoomed.w : 'none'}px after wheel-up; viewer gone after Escape=${gone}; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the preview zooms under the wheel and answers Escape`);
   } finally {
     await a.context.close();
   }
@@ -2455,6 +2520,7 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['button and avatar labels sit on their own center line', () => controlLabelsSitOnTheCenterLine(browser, httpOrigin, emit)],
           ['the full-text dialog scrolls and keeps its buttons on screen', () => longMessageModalScrollsInPlace(browser, httpOrigin, emit)],
           ['the image preview is the top layer over the chat', () => imagePreviewIsTheTopLayer(browser, httpOrigin, emit)],
+          ['the image preview zooms and closes on Escape', () => previewZoomsAndClosesOnEscape(browser, httpOrigin, emit)],
           ['an open dialog does not travel with the list behind it', () => dialogStaysPutWhileTheListMoves(browser, httpOrigin, emit)],
           ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
           ['an image message has one frame, at both widths', () => imageBubbleIsTheImageItself(browser, httpOrigin, emit)],

@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Avatar from '@/components/Avatar';
-import Modal, { Overlay } from '@/components/Modal';
+import Modal from '@/components/Modal';
+import ImagePreview from '@/components/ImagePreview';
 import NicknameDialog from '@/components/NicknameDialog';
 import {
   BellIcon,
-  CloseIcon,
   DownloadIcon,
   FileIcon,
   LockIcon,
@@ -17,7 +17,7 @@ import { RoomClient } from '@/lib/client/roomclient';
 import { RoomStore, type RoomSnapshot, type UiMsg } from '@/lib/client/roomstore';
 import { LIMITS } from '@/lib/constants';
 import { DecryptError, type AttachmentMeta } from '@/lib/crypto/envelope';
-import { copyText, dropFull, formatBytes, formatTime, fullUrl, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
+import { copyText, dropFull, formatBytes, formatTime, fullUrl, imageDims, release, retain, saveFile, thumbnailUrl } from '@/lib/client/media';
 import { currentPermission, notifyEncrypted, requestPermission } from '@/lib/client/notify';
 import { loadPrefs, setNotifyOptIn } from '@/lib/client/prefs';
 import { useNick } from '@/lib/client/identity';
@@ -264,8 +264,21 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
       const part = job.file.slice(start, start + length);
       return new Uint8Array(await part.arrayBuffer());
     };
-    client
-      .upload({ name: job.name, mime: job.file.type || 'application/octet-stream', size: job.file.size, kind: job.kind, slice })
+    // Read the original size before the transfer so it lands in the encrypted meta. A non-image, or
+    // a file the browser declines to decode, uploads exactly as before with the fields left unset.
+    const dims = job.kind === 'image' ? imageDims(job.file) : Promise.resolve(null);
+    dims
+      .then((size) =>
+        client.upload({
+          name: job.name,
+          mime: job.file.type || 'application/octet-stream',
+          size: job.file.size,
+          kind: job.kind,
+          width: size?.width,
+          height: size?.height,
+          slice
+        })
+      )
       .then(() => {
         // Released before the state update, never in a finally(): React flushes this render on a
         // microtask queued while the promise chain is still running, so a later release would let
@@ -927,14 +940,15 @@ function ImageBody({
         }}
       />
       {zoom ? (
-        <Overlay>
-          <div className="lightbox" onClick={() => { dropFull(id); setZoom(null); }}>
-            <img src={zoom} alt="" />
-            <button type="button" className="icon-btn" aria-label="关闭预览">
-              <CloseIcon />
-            </button>
-          </div>
-        </Overlay>
+        <ImagePreview
+          // Width and height are omitted rather than guessed: a 1x1 placeholder would give the
+          // viewer a wrong fit and a wrong "100%", which is worse than letting it measure on load.
+          image={{ src: zoom, ...(meta.width && meta.height ? { width: meta.width, height: meta.height } : {}) }}
+          onClose={() => {
+            dropFull(id);
+            setZoom(null);
+          }}
+        />
       ) : null}
     </>
   );

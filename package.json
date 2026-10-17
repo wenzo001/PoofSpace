@@ -29,6 +29,7 @@
     "@noble/hashes": "^1.8.0",
     "better-sqlite3": "^12.4.1",
     "next": "^16.4.0",
+    "photoswipe": "5.4.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "ws": "^8.18.0"

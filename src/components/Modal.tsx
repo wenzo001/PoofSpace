@@ -19,11 +19,6 @@ function useBodyHost(): HTMLElement | null {
  * number its `z-index` says. Pre-rendering returns nothing: an overlay only ever exists after a
  * client-side interaction.
  */
-export function Overlay({ children }: { children: ReactNode }) {
-  const host = useBodyHost();
-  return host ? createPortal(children, host) : null;
-}
-
 export default function Modal({
   title,
   onClose,

@@ -51,6 +51,23 @@ async function decrypt(client: RoomClient, id: string, mime: string): Promise<Bl
   return new Blob([bytes as unknown as BlobPart], { type: mime || 'application/octet-stream' });
 }
 
+/**
+ * The original pixel size, read once before upload. The thumbnail path below decodes the file,
+ * learns these numbers and throws them away; the viewer needs them up front, because inferring
+ * them after the image loads would re-measure the layout at the moment the pixels arrive -- the
+ * same class of jump the scroll hold has to compensate for.
+ */
+export async function imageDims(file: Blob): Promise<{ width: number; height: number } | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const dims = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dims;
+  } catch {
+    return null;
+  }
+}
+
 export async function thumbnailUrl(client: RoomClient, id: string, meta: AttachmentMeta): Promise<string | null> {
   const e = entry(id);
   if (e.thumb) return e.thumb;
