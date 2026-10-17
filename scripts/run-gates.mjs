@@ -248,7 +248,12 @@ const GATES = [
       const statics = path.join(artifact, '.next', 'static');
       const staticCount = fs.existsSync(statics) ? countFiles(statics) : 0;
       const banned = ['src', 'tests', 'data', 'node_modules/typescript', 'node_modules/vitest'].filter((p) => fs.existsSync(path.join(artifact, p)));
-      const expected = ['better-sqlite3', 'ws', '@noble/ciphers', '@noble/hashes', 'next', 'react', 'react-dom'];
+      // Derived from the shipped manifest, not hand-copied. A hand copy only ever complains about
+      // the names someone remembered to put in it, so a new runtime dependency that never reached
+      // the artifact would pass -- which is precisely what adding photoswipe would have done.
+      const expected = Object.keys(
+        JSON.parse(fs.readFileSync(path.join(artifact, 'package.json'), 'utf8')).dependencies ?? {}
+      );
       const present = new Set(info.packages.map((p) => p.id.slice(0, p.id.lastIndexOf('@'))));
       const missing = expected.filter((n) => !present.has(n));
       const abiOk = natives.length > 0;
