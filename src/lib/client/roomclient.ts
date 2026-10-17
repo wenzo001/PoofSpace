@@ -809,6 +809,33 @@ export class RoomClient {
   }
 
   /**
+   * Arms this room's own recovery window, or clears it with `null`. The creator token goes in the
+   * body and never in the path: a URL is what ends up in an access log and in browser history, and
+   * this string is what lets someone destroy the room.
+   */
+  async setIdleDelay(ms: number | null): Promise<void> {
+    if (!this.creatorToken) throw new Error('only the creator can arm a delay');
+    const res = await this.http(`/api/rooms/${this.invite.roomId}/delay`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ creatorToken: this.creatorToken, idleDelayMs: ms })
+    });
+    if (!res.ok) throw new Error(`delay refused: ${res.status}`);
+  }
+
+  /** What this room is currently held for, as armed by the owner. Header-carried, for the same
+   *  reason the write is body-carried. */
+  async getIdleDelay(): Promise<number | null> {
+    if (!this.creatorToken) throw new Error('only the creator can read the arming');
+    const res = await this.http(`/api/rooms/${this.invite.roomId}/delay`, {
+      headers: { 'x-poof-creator': this.creatorToken }
+    });
+    if (!res.ok) throw new Error(`delay read refused: ${res.status}`);
+    const body = (await res.json()) as { idleDelayMs?: number | null };
+    return body.idleDelayMs ?? null;
+  }
+
+  /**
    * The server answers one bit: is this link still usable? A room in its recovery window is,
    * so a device that was offline for a minute can walk back into the same room; a room that ran
    * out of that window is gone for good and the local recovery entry has to go with it.

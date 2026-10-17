@@ -19,6 +19,7 @@ export interface RoomRow {
   destroy_reason: string | null;
   destroyed_at: number | null;
   attachment_bytes: number;
+  idle_delay_ms: number | null;
 }
 
 export interface SlotRow {

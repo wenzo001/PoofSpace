@@ -13,6 +13,7 @@ export interface AppConfig {
   env: 'development' | 'production' | 'test';
   maxMembersDefault: number;
   maxRooms: number;
+  maxDelayedRooms: number;
   roomIdleTtlMs: number;
   heartbeatServerMs: number;
   heartbeatGraceMs: number;
@@ -91,6 +92,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       max: LIMITS.maxMembersHard
     }),
     maxRooms: bounded('MAX_ROOMS', env.MAX_ROOMS, LIMITS.maxRoomsDefault, { min: 1, max: LIMITS.maxRoomsHard }),
+    // Bounded by this node's own room capacity: "up to 5 delayed rooms" on a node that holds 3
+    // rooms is a number nobody can reach, and 0 means the feature is switched off at startup
+    // rather than refused per request.
+    maxDelayedRooms: bounded('MAX_DELAYED_ROOMS', env.MAX_DELAYED_ROOMS, LIMITS.maxDelayedRoomsDefault, {
+      min: 0,
+      max: bounded('MAX_ROOMS', env.MAX_ROOMS, LIMITS.maxRoomsDefault, { min: 1, max: LIMITS.maxRoomsHard })
+    }),
     roomIdleTtlMs:
       bounded('ROOM_IDLE_TTL_SECONDS', env.ROOM_IDLE_TTL_SECONDS, LIMITS.roomIdleTtlSeconds, {
         min: 30,

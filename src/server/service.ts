@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import type { AppConfig } from './config';
 import type { Db, RoomRow } from './db';
 import type { RoomStorage } from './storage';
-import { ERR, LIMITS, SLOT_HOLDING_STATUSES, type RoomDestroyReason, type RoomStatus } from '../lib/constants';
+import { ERR, IDLE_DELAY_CHOICES_MS, LIMITS, SLOT_HOLDING_STATUSES, type RoomDestroyReason, type RoomStatus } from '../lib/constants';
 import { isCanonicalRoomId } from '../lib/crypto/invite';
 import type { AttachmentIndex, MemberDto, MessageDto } from '../lib/proto';
 import { logger } from './log';
@@ -893,6 +893,55 @@ export class RoomService extends EventEmitter {
     if (dropped) logger.info('heartbeat sweep dropped members', { dropped });
     if (reclaimed) logger.warn('stranded slot rows reclaimed', { reclaimed });
     return { dropped, reclaimed, destroyed };
+  }
+
+  /**
+   * Creator authority, the same comparison `destroy` makes. The `is_creator` slot flag is not an
+   * authority here because slot numbers are re-issued: whoever holds the 32 bytes in the row is the
+   * owner, and that is the only definition that survives a reconnect.
+   */
+  private isCreatorToken(room: RoomRow, creatorToken: string): boolean {
+    if (!creatorToken) return false;
+    const given = Buffer.from(creatorToken, 'base64url');
+    return given.length === room.creator_token.length && crypto.timingSafeEqual(given, room.creator_token);
+  }
+
+  /**
+   * Arms (or clears) this room's own recovery window. Refused before anything is written when the
+   * value is not one of the six shipped choices, so no arbitrary number can reach the sweep.
+   */
+  setIdleDelay(roomId: string, creatorToken: string, ms: number | null): { ok: boolean; code?: string } {
+    if (ms !== null && !IDLE_DELAY_CHOICES_MS.includes(ms)) return { ok: false, code: ERR.badDelay };
+    return this.db.tx(() => {
+      const room = this.q.getRoom(roomId);
+      if (!room || room.status === 'DESTROYING' || room.status === 'DESTROYED') return { ok: false, code: ERR.roomNotFound };
+      if (!this.isCreatorToken(room, creatorToken)) return { ok: false, code: ERR.notCreator };
+      if (ms === null) {
+        // Always allowed, even with the feature switched off: an arming made before a config
+        // tightening must stay revocable by the owner who made it.
+        this.db.raw.prepare('UPDATE rooms SET idle_delay_ms=NULL, updated_at=? WHERE id=?').run(Date.now(), roomId);
+        return { ok: true };
+      }
+      // The cap counts rooms currently holding a window, not arming operations: re-arming one that
+      // already has it must not be refused by its owner's earlier choice.
+      if (room.idle_delay_ms === null) {
+        const armed = this.db.raw
+          .prepare("SELECT COUNT(*) c FROM rooms WHERE idle_delay_ms IS NOT NULL AND status <> 'DESTROYING'")
+          .get() as { c: number };
+        if (armed.c >= this.cfg.maxDelayedRooms) return { ok: false, code: ERR.delayCapacityFull };
+      }
+      this.db.raw.prepare('UPDATE rooms SET idle_delay_ms=?, updated_at=? WHERE id=?').run(ms, Date.now(), roomId);
+      return { ok: true };
+    });
+  }
+
+  /** The owner's own read of what they armed. Members, and anyone probing without the token, get
+   *  nothing: the public status route still answers one bit. */
+  idleDelayFor(roomId: string, creatorToken: string): { ok: boolean; idleDelayMs?: number | null; code?: string } {
+    const room = this.q.getRoom(roomId);
+    if (!room) return { ok: false, code: ERR.roomNotFound };
+    if (!this.isCreatorToken(room, creatorToken)) return { ok: false, code: ERR.notCreator };
+    return { ok: true, idleDelayMs: room.idle_delay_ms };
   }
 
   private cancelEmptyTimer(roomId: string, mem: RoomMemory): void {

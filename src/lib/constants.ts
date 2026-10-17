@@ -34,6 +34,9 @@ export const LIMITS = {
   // network blip must be survivable, so the room sits in IDLE_GRACE for exactly this long.
   roomIdleTtlSeconds: 300,
   roomIdleTtlMaxSeconds: 86_400,
+  // How many rooms on this node may hold an extended window at once. Counted at the moment of
+  // arming, not by a separate table: an armed room still owns ciphertext, so it still holds a slot.
+  maxDelayedRoomsDefault: 5,
 
   connectionsNodeMax: 4000,
   connectionsPerIpMax: 512,
@@ -104,8 +107,17 @@ export const ERR = {
   attachmentNotFound: 'ATTACHMENT_NOT_FOUND',
   uploadNotFound: 'UPLOAD_NOT_FOUND',
   invalidNonce: 'INVALID_NONCE',
-  nonceReuse: 'NONCE_REUSE'
+  nonceReuse: 'NONCE_REUSE',
+  badDelay: 'BAD_DELAY_CHOICE',
+  delayCapacityFull: 'DELAY_CAPACITY_FULL'
 } as const;
+
+/**
+ * The only per-room recovery windows a creator may arm. A fixed set rather than a range: it keeps
+ * the 72-hour case expressible without borrowing `roomIdleTtlMaxSeconds`' 24-hour ceiling on the
+ * global default, and it leaves no way to smuggle an arbitrary number past the node's own bounds.
+ */
+export const IDLE_DELAY_CHOICES_MS: readonly number[] = [4, 8, 12, 24, 36, 72].map((h) => h * 3_600_000);
 
 /**
  * Join refusals that will still be true on the next attempt: the room is gone, or the secret is

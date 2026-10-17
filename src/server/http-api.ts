@@ -184,6 +184,34 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse, deps:
     return true;
   }
 
+  if (rest === '/delay' && method === 'POST') {
+    const body = await readBody(req, 64 * 1024);
+    if (!body) return fail(res, 413, ERR.tooLarge, 'body too large'), true;
+    let creatorToken = '';
+    let idleDelayMs: number | null = null;
+    try {
+      const parsed = JSON.parse(body.toString('utf8')) as { creatorToken?: string; idleDelayMs?: number | null };
+      creatorToken = String(parsed.creatorToken ?? '');
+      idleDelayMs = parsed.idleDelayMs === null || parsed.idleDelayMs === undefined ? null : Number(parsed.idleDelayMs);
+    } catch {
+      return fail(res, 400, 'BAD_BODY', 'malformed body'), true;
+    }
+    // The creator token travels in the body, never in the path or query: a URL is what ends up in
+    // access logs and in a browser's history. Session authorization already happened above, so a
+    // caller has to hold both the room session and the owner credential.
+    const out = service.setIdleDelay(roomId, creatorToken, idleDelayMs);
+    if (!out.ok) return fail(res, out.code === ERR.roomNotFound ? 404 : 403, out.code ?? ERR.notCreator, 'delay refused'), true;
+    json(res, 200, { idleDelayMs });
+    return true;
+  }
+
+  if (rest === '/delay' && method === 'GET') {
+    const out = service.idleDelayFor(roomId, String(req.headers['x-poof-creator'] ?? ''));
+    if (!out.ok) return fail(res, out.code === ERR.roomNotFound ? 404 : 403, out.code ?? ERR.notCreator, 'unavailable'), true;
+    json(res, 200, { idleDelayMs: out.idleDelayMs ?? null });
+    return true;
+  }
+
   const attMatch = /^\/attachments\/([^/]+)(\/chunks\/(\d+))?$/.exec(rest);
   if (attMatch) {
     const attachmentId = attMatch[1] as string;

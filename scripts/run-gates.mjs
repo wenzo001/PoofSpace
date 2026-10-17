@@ -213,7 +213,7 @@ const LANES = {
   T2: ['tests/security'],
   T3: ['tests/lifecycle'],
   T4: ['tests/perf'],
-  T6: ['tests/capacity', 'tests/storage', 'tests/admin']
+  T6: ['tests/capacity', 'tests/storage', 'tests/admin', 'tests/governance']
 };
 
 const GATES = [
