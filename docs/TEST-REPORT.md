@@ -777,3 +777,19 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
 `752d6a8` 之后继续（多图 dataSource、`PreviewHost.tsx`、`cachedThumb`、`data-preview` 唯一化），
 所有读数都跑在 `scratch/build-preview-clean.log` 那一次编译之上；刀各自的产物见上表的 build 日志。
 
+**整台面两遍，第一遍不交结论**（收尾顺序：文档 → 提交 → 打包 → 一遍台面）：
+
+| 遍 | 读数 | 说明 |
+| --- | --- | --- |
+| `scratch/gates-S.log` | **15 passed / 1 failed / 0 skipped**，`GATES_EXIT=1` | 红的恰好是 T5 里的 `pinned list holds on incoming`，签名与 D27 记过的一模一样：`inbound-frame seen at neverms`、`sizer-growth at neverms`、`frames 39/457/95` 采满 8 s 上限。**单跑同一条腿立刻绿**（`scratch/pinned-single-after-gates.log`：`inbound-frame 27ms` 与 `sizer-growth 27ms` 重合）。跑之前数过进程：`chrome=0`、`node=3` ⇒ 不是上一遍留下的浏览器在抢 |
+| `scratch/gates-T.log` | **16 passed / 0 failed / 0 skipped**，`GATES_EXIT=0` | 同一棵树、同一个包。交付结论只读这三个数 |
+
+⇒ 这一遍**没有**把 D27 消音（没调超时、没改判据），也没有把第一遍的红当成"已排除"：它只是与本轮改动
+无关的那条已知抖动腿又出现了，且本轮把它的发生概率**推高了一格**——浏览器线从 30 条加到 33 条，
+其中三条各自上传 1200×800 的原图。这条相关性登记进 D27。
+
+**交付包**：`scratch/release-S.log`（`RELEASE_EXIT=0`）。`release/build-info.json`：
+`packages 61`（本轮之前是 60，多的那一个就是 `photoswipe`）、`stagedCopyVerified true`、
+`extractedTarballVerified true`。`release/poofspace/node_modules/photoswipe/` 在包里，
+门禁 B2 的名单从包内 `package.json` 派生 ⇒ "声明了却没进包"这件事本身就是红灯。
+
