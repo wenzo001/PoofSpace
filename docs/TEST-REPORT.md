@@ -878,6 +878,17 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
    ACTIVE 期装填被误作废）；把 `v === 2` 分支那一跳摘掉 ⇒ 存储线 **1 红 1 绿**（v2 那条红在
    `to include 'idle_delay_ms'`，v1 那条照绿 —— 与上一轮"v1 分支摘一跳"配成两半）。
 3. **"第 N+1 次装填被拒且文案不含数字"这一半没有判据** ⇒ 登记为 D41：现在只钉了返回码
-   `DELAY_CAPACITY_FULL`，用户界面那句 `服务器拒绝了这次设置` 没有任何东西在读它有没有数字。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+   `DELAY_CAPACITY_FULL`，用户界面那句 `服务器拒绝了这次设置` 没有任何东西在读它有没有数字。
+
+**spec §10 最后一把刀（延迟房仍占名额）**：把 `IDLE_GRACE` 从 `SLOT_HOLDING_STATUSES` 里摘掉 ⇒
+`tests/capacity/room-capacity` 第 3 条红在 `expected 2 to be 3`（其余 48 条全绿）。
+这条腿不是本轮新写的，但它就是"装填过的房间照常占名额"这句话的守卫 —— 名单一字未改，所以不需要新判据，
+需要的是确认旧判据真的在读这一格。
+
+**定稿包的台面读数**：`scratch/gates-AA.log` —— **15 / 1 / 0**，红的还是 D27 那条
+（`inbound-frame seen at neverms`、采满 8 s），35 条腿里其余 34 条全过；包内文档与 HEAD 全等（`DIFF` 0）。
+它前一遍 `gates-X` 是 **16 / 0 / 0**（同一个源码树，只隔一次文档重打包）。
+⇒ 交付结论按 §7.13 同一条口径写：**"底部不抖动"不是本轮认证过的主张**（D27 的结案读数仍未拿到），
+本轮认证的是"延迟销毁这 15 条判据 + 10 把刀 + 35 条腿里与本轮相关的每一条各自绿"。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 
