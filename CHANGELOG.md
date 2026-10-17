@@ -27,9 +27,6 @@ claims in `docs/DEBT.md`.
   - Judgements added: `tests/storage/schema-migration` (2), `tests/lifecycle/idle-delay` (6),
     `tests/governance/idle-delay-guard` (4), `tests/integration/idle-delay-api` (3), and the browser
     leg `the creator can arm a delayed destroy`. Each has its own knife; see `docs/TEST-REPORT.md`.
-
-### Added
-
 - Images now open in a real viewer: wheel / double-tap / pinch zoom, drag to pan, paging through the
   room's images with the arrow keys or a swipe, and Escape to close. PhotoSwipe 5.4.4 (MIT, zero
   transitive dependencies) sits behind one adapter — `src/components/ImagePreview.tsx` is the only
@@ -46,9 +43,25 @@ claims in `docs/DEBT.md`.
 - The artifact dependency check (gate B2) derives its expected list from the `dependencies` of the
   `package.json` inside the staged artifact. The hand-copied list could only ever complain about the
   names someone remembered to add, so a new runtime dependency that never reached the package passed.
+- Every outward claim about the recovery window now follows the capability instead of the old flat
+  number: the home page hero said the room burns "5 minutes after the last person leaves",
+  `docs/ARCHITECTURE.md` described the temporary store as a 5-minute recovery period,
+  `docs/DEPLOYMENT.md`'s upgrade note described only the v1 hop and said *every* room enters a
+  300-second window, and a service comment called the window "5 minutes". SECURITY and both READMEs
+  gained the qualifier ("无人 **且到期** 即销毁；默认 300 秒，房主可显式延长"), and DEPLOYMENT documents
+  `MAX_DELAYED_ROOMS` plus the fact that `ROOM_IDLE_TTL_SECONDS`' 24-hour ceiling governs only the
+  node default.
+- The `room entered idle grace` log line printed the node default next to a room that could be armed
+  for 72 hours; it now prints the window that room is actually held for.
 
 ### Fixed
 
+- The home page's identity pill (avatar + nickname) was not centred inside the ring it draws on
+  hover: the content sat 4px from the left inner edge and 12px from the right, because the padding
+  had two owners and the later rule restated it as `3px 12px 3px 3px`. At 390px the name is hidden by
+  design, which left a 28px avatar 3px off one side of a 45x44 box. One owner now, tokens only, and a
+  44pt square at the narrow width. The hover border itself never shifted anything (measured:
+  `hoverSizeDelta x=0`) -- the ring is what made the lopsided inset visible.
 - Clicking the image itself used to close the preview: the old overlay's close button had no handler
   of its own, so the only way out was a click anywhere — including on the picture.
 - `[data-preview="image"]` could end up stamped on more than one of the viewer's three reused slide
