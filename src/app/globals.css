@@ -299,6 +299,18 @@ a {
   background: var(--hover);
 }
 
+/* The six arming tiers, two columns: a single column of six pushed the 关闭 button below the fold
+   on a phone, which is the exact failure the long-message dialog already had to fix. */
+.delay-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-2);
+}
+
+.delay-tier {
+  min-height: var(--tap);
+}
+
 .me .name {
   font-size: var(--fs-md);
   color: var(--body);

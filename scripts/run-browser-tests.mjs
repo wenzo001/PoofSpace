@@ -2197,6 +2197,89 @@ async function identityPillCentersItsContent(browser, origin, emit) {
   emit(`${ok ? 'PASS' : 'FAIL'} the identity pill centres its content inside the hover ring`);
 }
 
+/**
+ * The arming control is owner-only, so this runs two devices: a peer that never held the creator
+ * credential must not see the button at all (not "see it and be refused" -- the refusal is already
+ * covered server-side, and a control that appears and then fails is a defect on its own).
+ *
+ * Geometry, not presence: the six tiers are measured as rendered boxes because a grid that squeezes
+ * them under 44pt, or one that pushes 关闭 below the dialog, would both still be "six buttons".
+ */
+async function creatorCanArmADelayedDestroy(browser, origin, emit) {
+  const a = await openHome(browser, origin);
+  let peer = null;
+  try {
+    const { roomId } = await createRoom(a.page, origin);
+    await a.page.waitForSelector('.composer textarea', { timeout: 30000 });
+    const link = await inviteLink(a.page, origin, roomId);
+    peer = await browser.newContext({ ignoreHTTPSErrors: true });
+    const p2 = await peer.newPage();
+    await gotoPage(p2, link);
+    await p2.waitForSelector('.composer textarea', { timeout: 45000 });
+    const peerOpen = await p2.locator('[data-delay="open"]').count();
+    const peerSeesArming = await p2.locator('[data-delay-tier]').count();
+
+    await a.page.locator('[data-delay="open"]').click();
+    await a.page.waitForSelector('.delay-tier', { timeout: 20000 });
+    const geom = await a.page.evaluate(() => {
+      const tiers = [...document.querySelectorAll('.delay-tier')];
+      const boxes = tiers.map((t) => {
+        const r = t.getBoundingClientRect();
+        return { w: Math.round(r.width), h: Math.round(r.height) };
+      });
+      const modal = document.querySelector('.modal');
+      const close = [...document.querySelectorAll('.modal button')].find((x) => (x.textContent ?? '').trim() === '关闭');
+      const cr = close?.getBoundingClientRect();
+      const mr = modal?.getBoundingClientRect();
+      return {
+        count: tiers.length,
+        labels: tiers.map((t) => (t.textContent ?? '').trim()),
+        minH: Math.min(...boxes.map((x) => x.h)),
+        minW: Math.min(...boxes.map((x) => x.w)),
+        closeInside: !!(cr && mr && cr.bottom <= mr.bottom + 1 && cr.top >= mr.top - 1)
+      };
+    });
+
+    await a.page.locator('[data-delay-tier="8"]').click();
+    // The lane keeps no pixels today, and this dialog is the first screen in the app with a grid of
+    // choices: a leg can read 44px boxes and still miss a dialog that looks wrong.
+    try {
+      fs.mkdirSync(path.join(root, 'scratch', 'shots-lane'), { recursive: true });
+      await a.page.screenshot({ path: path.join(root, 'scratch', 'shots-lane', 'delay-dialog.png') });
+    } catch {
+      /* pixels are a bonus, never a verdict */
+    }
+    await a.page.waitForSelector('[data-delay="note"]', { timeout: 20000 });
+    const note = String(await a.page.locator('[data-delay="note"]').textContent());
+    const current = String(await a.page.locator('[data-delay="current"]').textContent());
+    await a.page.locator('[data-delay="clear"]').click();
+    await a.page.waitForFunction(
+      () => (document.querySelector('[data-delay="current"]')?.textContent ?? '').includes('未设置'),
+      null,
+      { timeout: 20000 }
+    );
+    const cleared = String(await a.page.locator('[data-delay="current"]').textContent());
+
+    // The labels are the six strings the dialog is supposed to show, written here rather than
+    // derived from the component: a tier list that drifts has to be edited in two places on purpose.
+    const wantLabels = ['4 小时', '8 小时', '12 小时', '24 小时', '36 小时', '72 小时'];
+    const ok =
+      peerOpen === 0 && peerSeesArming === 0 &&
+      geom.count === 6 && geom.minH >= 44 && geom.minW >= 44 && geom.closeInside &&
+      geom.labels.join('|') === wantLabels.join('|') &&
+      /已设为 8 小时/.test(note) && /当前：8 小时/.test(current) && /未设置/.test(cleared);
+    record(
+      'the creator can arm a delayed destroy',
+      ok ? 'PASS' : 'FAIL',
+      `peer sees open=${peerOpen} and tiers=${peerSeesArming}; creator sees ${geom.count} tiers min ${geom.minW}x${geom.minH}px, 关闭 inside the dialog=${geom.closeInside}, labels=[${geom.labels.join(' ')}]; arming 8h read back "${current.trim()}" (note "${note.trim()}"); after clear "${cleared.trim()}"; room ${roomId.slice(0, 6)}`
+    );
+    emit(`${ok ? 'PASS' : 'FAIL'} the room owner can arm and clear a longer recovery window`);
+  } finally {
+    if (peer) await peer.close();
+    await a.context.close();
+  }
+}
+
 async function dialogStaysPutWhileTheListMoves(browser, origin, emit) {
   const a = await openHome(browser, origin);
   try {
@@ -2804,6 +2887,7 @@ export async function runBrowserLane({ quiet = false, headed = false, only = nul
           ['the preview pages between images', () => previewPagesBetweenImages(browser, httpOrigin, emit)],
           ['the preview pans the zoomed image', () => previewPansWhenZoomed(browser, httpOrigin, emit)],
           ['the preview releases the decrypted image on close', () => previewReleasesTheDecryptedImage(browser, httpOrigin, emit)],
+          ['the creator can arm a delayed destroy', () => creatorCanArmADelayedDestroy(browser, httpOrigin, emit)],
           ['an open dialog does not travel with the list behind it', () => dialogStaysPutWhileTheListMoves(browser, httpOrigin, emit)],
           ['one picker renders pictures as pictures and files as cards', () => onePickerSplitsPicturesFromFiles(browser, httpOrigin, emit)],
           ['an image message has one frame, at both widths', () => imageBubbleIsTheImageItself(browser, httpOrigin, emit)],

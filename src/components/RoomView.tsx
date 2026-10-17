@@ -5,6 +5,7 @@ import Avatar from '@/components/Avatar';
 import Modal from '@/components/Modal';
 import PreviewHost from '@/components/PreviewHost';
 import NicknameDialog from '@/components/NicknameDialog';
+import DelayDialog from '@/components/DelayDialog';
 import {
   BellIcon,
   DownloadIcon,
@@ -101,6 +102,7 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
   const [showMembers, setShowMembers] = useState(false);
   const [showNick, setShowNick] = useState(false);
   const [showDestroy, setShowDestroy] = useState(false);
+  const [showDelay, setShowDelay] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [notifyPerm, setNotifyPerm] = useState<string>('unsupported');
@@ -534,6 +536,11 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
           邀请
         </button>
         {client?.isCreator ? (
+          <button type="button" className="pill ghost" data-delay="open" onClick={() => setShowDelay(true)}>
+            延时
+          </button>
+        ) : null}
+        {client?.isCreator ? (
           <button type="button" className="pill danger" onClick={() => setShowDestroy(true)}>
             销毁
           </button>
@@ -724,6 +731,8 @@ export default function RoomView({ roomId: roomIdProp }: { roomId: string }) {
           }}
         />
       ) : null}
+
+      {showDelay && client ? <DelayDialog client={client} onClose={() => setShowDelay(false)} /> : null}
 
       {showDestroy ? (
         <DestroyDialog onClose={() => setShowDestroy(false)} onConfirm={() => void destroyRoom()} />
