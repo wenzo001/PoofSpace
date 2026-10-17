@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { RoomStatus } from '../lib/constants';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface RoomRow {
   id: string;
@@ -64,6 +64,31 @@ export interface AttachmentRow {
 }
 
 const ROOMS_TABLE_DDL = `CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL CHECK (status IN ('ACTIVE','IDLE_GRACE','DESTROYING','DESTROYED')),
+  join_key BLOB NOT NULL,
+  creator_token BLOB NOT NULL,
+  max_members INTEGER NOT NULL,
+  next_slot INTEGER NOT NULL DEFAULT 1,
+  head_seq INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  empty_since INTEGER,
+  destroy_reason TEXT,
+  destroyed_at INTEGER,
+  attachment_bytes INTEGER NOT NULL DEFAULT 0,
+  -- Per-room override of the recovery window, armed by the creator and consumed once. NULL means
+  -- "use the node default". The expiry instant is never stored: it stays derived from empty_since,
+  -- so a restart cannot disagree with a sweep about when a room dies.
+  idle_delay_ms INTEGER
+)`;
+
+/**
+ * The shape v2 was, kept verbatim because `migrateV1toV2` rebuilds into it. If that hop built the
+ * *current* table instead, a v1 file would arrive at v3 having skipped the v2->v3 hop entirely, and
+ * the test that exists to prove the chain does not skip would pass with the hop deleted.
+ */
+const ROOMS_V2_DDL = `CREATE TABLE IF NOT EXISTS rooms (
   id TEXT PRIMARY KEY,
   status TEXT NOT NULL CHECK (status IN ('ACTIVE','IDLE_GRACE','DESTROYING','DESTROYED')),
   join_key BLOB NOT NULL,
@@ -175,12 +200,20 @@ export class Db {
     try {
       this.raw.exec(DDL);
       const row = this.raw.prepare('SELECT value FROM meta WHERE key = ?').get('schema_version') as { value: string } | undefined;
+      const v = row ? Number(row.value) : SCHEMA_VERSION;
       if (!row) {
         this.raw.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
-      } else if (Number(row.value) === 1) {
+      } else if (v === 1) {
+        // Both hops, in order. A branch per version that each stamps SCHEMA_VERSION itself would
+        // mark a v1 file as v3 without ever running v2->v3, and the column would be missing on the
+        // one deployment that has been upgraded twice.
         migrateV1toV2(this.raw);
+        migrateV2toV3(this.raw);
         this.raw.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
-      } else if (Number(row.value) !== SCHEMA_VERSION) {
+      } else if (v === 2) {
+        migrateV2toV3(this.raw);
+        this.raw.prepare('UPDATE meta SET value = ? WHERE key = ?').run(String(SCHEMA_VERSION), 'schema_version');
+      } else if (v !== SCHEMA_VERSION) {
         throw new Error(`Unsupported database schema version ${row.value}; expected ${SCHEMA_VERSION}`);
       }
     } catch (err) {
@@ -240,7 +273,7 @@ function migrateV1toV2(raw: Database.Database): void {
   raw.pragma('foreign_keys = OFF');
   raw.transaction(() => {
     raw.exec(
-      ROOMS_TABLE_DDL.replace('CREATE TABLE IF NOT EXISTS rooms', 'CREATE TABLE rooms_v2') +
+      ROOMS_V2_DDL.replace('CREATE TABLE IF NOT EXISTS rooms', 'CREATE TABLE rooms_v2') +
         `;
         INSERT INTO rooms_v2 (id,status,join_key,creator_token,max_members,next_slot,head_seq,created_at,updated_at,empty_since,destroy_reason,destroyed_at,attachment_bytes)
         SELECT id,
@@ -253,6 +286,18 @@ function migrateV1toV2(raw: Database.Database): void {
     );
   })();
   raw.pragma('foreign_keys = ON');
+  const broken = raw.prepare('PRAGMA foreign_key_check').all();
+  if (broken.length) throw new Error(`schema migration left ${broken.length} orphan rows`);
+}
+
+/**
+ * v3 adds one nullable column. A nullable ADD COLUMN is in-place in SQLite, so unlike v1->v2 there
+ * is no table rebuild -- and every room that is inside its window right now has to survive this,
+ * because the deployment carrying this code is already running with data in it.
+ */
+function migrateV2toV3(raw: Database.Database): void {
+  const cols = (raw.prepare('PRAGMA table_info(rooms)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('idle_delay_ms')) raw.exec('ALTER TABLE rooms ADD COLUMN idle_delay_ms INTEGER');
   const broken = raw.prepare('PRAGMA foreign_key_check').all();
   if (broken.length) throw new Error(`schema migration left ${broken.length} orphan rows`);
 }

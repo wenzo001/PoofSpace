@@ -368,7 +368,9 @@ describe('temporary storage, and the residue a DELETE leaves behind', () => {
 
       const reopened = new Db(file);
       try {
-        expect((reopened.raw.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value: string }).value).toBe('2');
+        // Pinned to a literal on purpose: v1 now walks the whole chain, so reaching 3 is part of
+        // what this proves. Reading SCHEMA_VERSION here would let any version pass.
+        expect((reopened.raw.prepare("SELECT value FROM meta WHERE key='schema_version'").get() as { value: string }).value).toBe('3');
         const rows = reopened.raw.prepare('SELECT id, status FROM rooms ORDER BY id').all() as { id: string; status: string }[];
         // The room that had already emptied under v1 is recognised as being in the recovery window;
         // the one that still had people stays ACTIVE. Neither is deleted: a redeploy may not wipe
