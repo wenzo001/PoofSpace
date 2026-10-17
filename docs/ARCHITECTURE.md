@@ -107,7 +107,11 @@ nonce = 版本(1) ‖ slot(3) ‖ gen(2) ‖ counter(6)
 2. `IDLE_GRACE` 期间**什么都不删**：密文历史、附件分片、房间状态原样保留，仍占 `MAX_ROOMS` 名额；
    持有效邀请凭据的任何人重新进入即回到 `ACTIVE`，倒计时取消，回来的是同一间房（不是新建）；
 3. 300 秒（`ROOM_IDLE_TTL_SECONDS`，按墙钟计，停机也算）到期 → 原子进入 `DESTROYING`；此后新的请求、
-   浏览器刷新、服务重启都不能把它救回来；
+   浏览器刷新、服务重启都不能把它救回来。**一间房可以被房主显式延长**：`rooms.idle_delay_ms` 可空，
+   到期时刻**永远不落库**，一律由 `empty_since + effectiveIdleTtlMs(room)` 现算，而全服务只有
+   `effectiveIdleTtlMs` 一处知道"一间房此刻适用多长窗口"——清扫与开机恢复两处判定都必须走它，
+   否则一次重启就会把装着 72 小时的房间按 300 秒销毁掉（这条有专门的腿与刀）。schema 迁移**成链**
+   `v1→v2→v3`，各支只跳自己那一跳，v1 走两跳；`ADD COLUMN` 可空、原地完成，不重建表；
 4. `DESTROYING`：拒绝加入/写消息/新上传/下载，终止连接与在飞任务（`pendingUploadTtlMs` 回收孤儿上传）；
 5. 删 `rooms/<roomId>/**`（含未完成分片与 `.tmp`）→ **确认目录真空**才删库中该房间的行（含 `rooms` 行本身）
    → `wal_checkpoint(TRUNCATE)` → 按阈值 `VACUUM`；

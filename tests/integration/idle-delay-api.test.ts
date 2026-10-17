@@ -45,4 +45,24 @@ describe('the delay routes, over real HTTP', () => {
     // The owner's arming is untouched by either attempt.
     expect(await owner.getIdleDelay()).toBe(4 * H);
   });
+
+  /**
+   * Placement matters as much as the check: the route has to sit *behind* the session gate, or an
+   * anonymous caller could probe room ids for which the answer differs. A member's client refuses
+   * locally before sending anything, so only this raw request proves the order.
+   */
+  it('4. without a room session the route is refused before the creator check runs', async () => {
+    const owner = await newRoom(tb);
+    const roomId = owner.publicInvite.link.split('/room/')[1]?.split('#')[0] ?? '';
+    expect(roomId.length).toBeGreaterThan(10);
+    const anonymous = await fetch(`${tb.base}/api/rooms/${roomId}/delay`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ creatorToken: 'not-a-token', idleDelayMs: 4 * H })
+    });
+    expect(anonymous.status).toBe(401);
+    const readAnonymous = await fetch(`${tb.base}/api/rooms/${roomId}/delay`);
+    expect(readAnonymous.status).toBe(401);
+    expect(await owner.getIdleDelay()).toBeNull();
+  });
 });

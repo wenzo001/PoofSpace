@@ -190,7 +190,8 @@ curl -fsS http://127.0.0.1:3000/api/health
 | `LOG_LEVEL` | `info` | `debug`/`info`/`warn`/`error` |
 | `MAX_PARTICIPANTS_PER_ROOM` | `100` | 每房间人数上限（服务端执行；客户端要求更大值也不会越过它），硬上限 `500` |
 | `MAX_ROOMS` | `20` | 本节点同时承载的房间数；`ACTIVE`、`IDLE_GRACE` 与未完成清理的 `DESTROYING` 都占名额 |
-| `ROOM_IDLE_TTL_SECONDS` | `300` | 最后一人离开后的恢复窗口（IDLE_GRACE），到期才进入销毁；允许 `30..86400` |
+| `ROOM_IDLE_TTL_SECONDS` | `300` | 最后一人离开后的**默认**恢复窗口（IDLE_GRACE），到期才进入销毁；允许 `30..86400`。这个 24 小时硬顶只管全局默认值，**不参与**每房延时的白名单 |
+| `MAX_DELAYED_ROOMS` | `5` | 本节点同时持有"房主显式延长的恢复窗口"的房间数，校验区间 `0..MAX_ROOMS`；`0` = 整条延时功能关死（装填一律拒绝）。延长的房间**照常**占 `MAX_ROOMS` 名额，这个数只是再叠一层闸 |
 | `MAX_CONNECTIONS_NODE` / `MAX_CONNECTIONS_PER_IP` | `4000` / `512` | WebSocket 握手前的连接闸门，超限以 HTTP 503 拒绝，不占事件循环槽位 |
 | `TEMP_BYTES_MAX_NODE` | `20 GiB` | 全节点附件密文临时配额，与单房间配额一起把关 |
 | `VACUUM_FREELIST_PAGES` | `4096` | 空闲页超过该数时执行 `VACUUM`，重写文件而不是把已删页面留在自由列表里 |

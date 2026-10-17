@@ -798,6 +798,47 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
 重封的那一个，交付的是它）。`release/build-info.json`：`packages 61`（本轮之前是 60，多的那一个就是
 `photoswipe`）、`stagedCopyVerified true`、`extractedTarballVerified true`。
 `release/poofspace/node_modules/photoswipe/` 在包里，门禁 B2 的名单从包内 `package.json` 派生
-⇒ "声明了却没进包"这件事本身就是红灯。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+⇒ "声明了却没进包"这件事本身就是红灯。
+
+### 7.14 第八轮：延迟销毁（房主可装填的每房窗口），2026-10-17
+
+**这一轮的判据一共 15 条新的**：`tests/storage/schema-migration` 2、`tests/lifecycle/idle-delay` 6、
+`tests/governance/idle-delay-guard` 4、`tests/integration/idle-delay-api` 4 —— 少 1 条：
+`tests/integration` 的第 4 条是补的"路由排在会话闸之后"，见下。浏览器线新增 1 条（35 条腿）。
+
+**成链迁移的证人，以及它本来会怎么变成空枪**：`migrateV1toV2` 过去是拿 `ROOMS_TABLE_DDL` 重建表的 ——
+新列一加进那份 DDL，v1 那条腿就会**跳过 v2→v3 那一跳也照样拿到列**，于是"证明成链"的那条测试
+在删掉那一跳之后仍然绿。改成每一跳建自己那一版的表（`ROOMS_V2_DDL` 是 v1 的落点）之后，
+摘掉 `v === 1` 分支里的 `migrateV2toV3` 立刻红在
+`expected [...] to include 'idle_delay_ms'`，而 v2 那条同遍照绿。
+
+**"两处判定"与"两处取消"各自挨刀**：
+
+| 判据 | 刀 | 读数 |
+| --- | --- | --- |
+| `3. a restart inside the window keeps both the room and its deadline` | 开机判定改回问全局默认 | 只有这一条红。第一版它红在 `Cannot read properties of undefined (reading 'status')` —— 那是**运行时错**不是断言，补了一条"行数必须还是 1"的前置之后，红才说得出产品事实 |
+| `4. a member arriving mid-countdown…` 与 `6. a connected member found by the sweep…` | 从 `cancelEmptyTimer` 的 UPDATE 里删掉 `idle_delay_ms=NULL` | 第 4 条**照绿**（它走的是 join 那一支），只有第 6 条红：`expected 28800000 to be null`。⇒ 两条取消路径是两个证人，缺一条就是留一处无人守的洞 |
+| `1. only the six shipped choices are accepted` | 白名单换成 `ms > 0` | 红（范围检查不等于白名单） |
+| `2.` 与 `4.`（名额护卡 / `MAX_DELAYED_ROOMS=0`） | 把闸门阈值换成永远到不了的值 | 两条同时红：`expected true to be false`、`expected undefined to be 'DELAY_CAPACITY_FULL'` |
+| `3.`（房主鉴权） | 去掉 `timingSafeEqual` 前面的长度比较 | 红成 `expected 'THREW Input buffers must have the sam…' to be 'NOT_CREATOR'` —— 短 token 会**崩**而不是被拒。测试因此把调用包起来，让"抛异常"本身成为一个可读的答案 |
+| 同上 | 去掉写路径上的 `isCreatorToken` 门 | 红：`expected undefined to be 'NOT_CREATOR'` |
+| `4.`（路由排在会话闸之后） | —— | 正向读数：匿名 POST 与匿名 GET 都是 `401`，且房主的装填没被这次尝试改掉。加这条是因为成员的 client 在**发请求之前**就本地拒了，光靠它证明不了路由的顺序 |
+| 浏览器腿 `the creator can arm a delayed destroy` | 去掉页眉那颗的 `client?.isCreator` 门 | 红：`peer sees open=1` |
+| 同上 | 从档位表里删掉 36 小时那一档 | 红：`creator sees 5 tiers … labels=[4 小时 8 小时 12 小时 24 小时 72 小时]` |
+
+**这一轮又踩到、并且自己抓住的那次假红**：浏览器腿第一次报
+`arming 8h read back "未设置…" (note "服务器拒绝了这次设置")`。查下来是
+`dist/server/http-api.js` 的 mtime 是 17:54、而 `src/server/http-api.ts` 是 18:10 ——
+`next build` **不编译自建服务端**（那是 `tsc -p tsconfig.server.json`），所以腿跑的是没有 `/delay` 路由的旧产物。
+补编译之后同一条腿绿。同一遍里还有一次 `--only "'delayed"` 的引号事故，台面自己如实报
+`ran 0 of 35 leg(s)`，没有把"什么都没跑"交成绿。
+
+**像素**：`scratch/shots-lane/delay-dialog.png`（腿自己存的）—— 两列六档 + 取消延时 + 关闭都在折叠内，
+页眉那颗"延时"只对房主出现。关闭那颗白色主按钮的视觉重量仍是 §7.12 记过的那件"只有截图、没有判据"的事。
+
+**这一轮没有做到的**（登记进 DEBT，不写成通过）：小时级的墙钟从未真等过（全部是注入时钟）；
+72 小时房对 `TEMP_BYTES_MAX_NODE`/`MAX_ROOMS` 的压力没有读数；弹窗的 44pt 只在桌面宽度量过；
+以及"非房主带着真会话去 POST"这一发只有服务层与匿名两半，中间那一半（真成员 + 真 token 缺失）
+没有 HTTP 层的腿。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 

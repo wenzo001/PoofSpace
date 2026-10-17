@@ -13,6 +13,23 @@ claims in `docs/DEBT.md`.
 
 ### Added
 
+- The room owner can arm a one-time longer recovery window for the next absence: 4/8/12/24/36/72
+  hours, chosen from a `延时` button in the room header that only the creator sees. Anyone returning
+  during the countdown cancels it *and consumes the arming*, so this is a promise about the next
+  absence rather than a permanent setting. `MAX_DELAYED_ROOMS` (default 5, validated `0..MAX_ROOMS`,
+  `0` = feature off) caps how many rooms on a node hold one at a time; armed rooms keep counting
+  against `MAX_ROOMS` exactly as before.
+  - Storage: `rooms.idle_delay_ms` (nullable), reached by a **chained** migration `v1→v2→v3` so a
+    database that has already been upgraded once does not refuse to boot. The expiry instant is
+    never stored -- it stays `empty_since + effectiveIdleTtlMs(room)`, and that one function is the
+    only place in the server that knows which window a room is in. Both judges (the sweep and
+    startup recovery) ask it; the arming is authorized by the same `creator_token` path as destroy.
+  - Judgements added: `tests/storage/schema-migration` (2), `tests/lifecycle/idle-delay` (6),
+    `tests/governance/idle-delay-guard` (4), `tests/integration/idle-delay-api` (3), and the browser
+    leg `the creator can arm a delayed destroy`. Each has its own knife; see `docs/TEST-REPORT.md`.
+
+### Added
+
 - Images now open in a real viewer: wheel / double-tap / pinch zoom, drag to pan, paging through the
   room's images with the arrow keys or a swipe, and Escape to close. PhotoSwipe 5.4.4 (MIT, zero
   transitive dependencies) sits behind one adapter — `src/components/ImagePreview.tsx` is the only
