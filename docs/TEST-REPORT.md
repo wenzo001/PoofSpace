@@ -839,6 +839,16 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
 **这一轮没有做到的**（登记进 DEBT，不写成通过）：小时级的墙钟从未真等过（全部是注入时钟）；
 72 小时房对 `TEMP_BYTES_MAX_NODE`/`MAX_ROOMS` 的压力没有读数；弹窗的 44pt 只在桌面宽度量过；
 以及"非房主带着真会话去 POST"这一发只有服务层与匿名两半，中间那一半（真成员 + 真 token 缺失）
-没有 HTTP 层的腿。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+没有 HTTP 层的腿。
+
+**一处流程偏离，写下来而不是抹掉**：计划一 Task 6 Step 1 要求"产品改动前先单跑一遍整跑当改前基线"，
+本轮**没有做那一遍**。替代是上一轮收尾的两个读数（`gates-T` 16/0/0、`gates-V` 15/1/0，同类台面）
+与本轮改后 `gates-W` 的 16/0/0 相对照；但严格说"改前那一刻的整跑"缺一遍，所以本轮任何"没有回归"的说法
+只到"改后台面全绿 + 上一轮读数"这个强度，不到"改前改后同树对照"那个强度。
+
+**交付读数（本轮最后一个包）**：`scratch/gates-W.log` —— **16 passed / 0 failed / 0 skipped**，
+`GATES_EXIT=0`；包内文档与 HEAD 逐个 `git hash-object` 全等（`DIFF` 0 行），`packages 61`，
+两份冒烟 `stagedCopyVerified true` / `extractedTarballVerified true`。
+上一轮那条抖动腿（D27 `pinned list holds on incoming`）这一遍**没有红** —— 35 条腿 × 两来源全过。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 

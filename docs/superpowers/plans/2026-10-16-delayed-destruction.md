@@ -64,7 +64,7 @@
 - Consumes: 无（本任务是地基）
 - Produces: `rooms.idle_delay_ms INTEGER`（可空）；`SCHEMA_VERSION === 3`；`new Db(file)` 能从 v1 或 v2 升到 v3 且不删任何一行
 
-- [ ] **Step 1: 写失败的测试 —— v2 库必须能开机且拿到新列**
+- [x] **Step 1: 写失败的测试 —— v2 库必须能开机且拿到新列**
 
 创建 `tests/storage/schema-migration.test.ts`。这座库用**旧的 v2 DDL** 手工建，绕开 `Db` 构造函数：
 
@@ -121,12 +121,12 @@ describe('schema v2 -> v3 keeps the live database bootable', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试，确认它以"预期的方式"失败**
+- [x] **Step 2: 跑测试，确认它以"预期的方式"失败**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/storage/schema-migration.test.ts`
 Expected: FAIL —— `expect(SCHEMA_VERSION).toBe(3)` 收到 `2`。**不是** `Cannot find module`，也不是 `no such column`（那会是别的错）。
 
-- [ ] **Step 3: 加列、升版本、写 `migrateV2toV3`**
+- [x] **Step 3: 加列、升版本、写 `migrateV2toV3`**
 
 `src/server/db.ts:6` 改成 `export const SCHEMA_VERSION = 3;`；`ROOMS_TABLE_DDL`（`:66-80`）在 `attachment_bytes` 那行后加：
 
@@ -154,7 +154,7 @@ function migrateV2toV3(raw: Database.Database): void {
 }
 ```
 
-- [ ] **Step 4: 把构造函数改成成链，并补 v1 那一支**
+- [x] **Step 4: 把构造函数改成成链，并补 v1 那一支**
 
 `db.ts:177-185` 整块替换。**关键**：`v === 1` 那一支必须两跳都走 —— 各支独立跳号会让 v1 直接标成 3 而永远没有那一列：
 
@@ -175,12 +175,12 @@ function migrateV2toV3(raw: Database.Database): void {
       }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/storage/schema-migration.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: 补 v1 的证人 —— 这一条是"成链"唯一的证据**
+- [x] **Step 6: 补 v1 的证人 —— 这一条是"成链"唯一的证据**
 
 在同一文件加第 2 条测试。v1 的 DDL 里 `status` 的 CHECK **不含** `IDLE_GRACE`：
 
@@ -208,13 +208,13 @@ it('2. a v1 file reaches 3 *with* the column, i.e. the chain does not skip a hop
 Run: `node node_modules/vitest/vitest.mjs run tests/storage/schema-migration.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: 验牙 —— 摘掉链上的一跳，v1 那条必须红**
+- [x] **Step 7: 验牙 —— 摘掉链上的一跳，v1 那条必须红**
 
 临时把 `v === 1` 分支里的 `migrateV2toV3(this.raw);` 删掉，跑：
 Expected: **第 2 条红**，签名是 `expect(cols).toContain('idle_delay_ms')` 失败；第 1 条仍绿。
 这证明第 2 条测的确实是"成链"，不是"能不能开机"。然后把那一行**放回去**，重跑确认两条都绿。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add src/server/db.ts tests/storage/schema-migration.test.ts
@@ -233,7 +233,7 @@ git commit -m "feat(db): a per-room recovery window column, reached by a chained
 - Consumes: `rooms.idle_delay_ms`（Task 1）
 - Produces: `private effectiveIdleTtlMs(room: { idle_delay_ms: number | null }): number`；`sweepIdleGrace(now)` 与 `recoverOnStartup(now)` 都按每房窗口判定；两处取消都把该列清成 `NULL`
 
-- [ ] **Step 1: 写失败的测试 —— 装填的房在 71:59:59 还活着**
+- [x] **Step 1: 写失败的测试 —— 装填的房在 71:59:59 还活着**
 
 创建 `tests/lifecycle/idle-delay.test.ts`。`sweepIdleGrace(now)` 与 `recoverOnStartup(now)` 本来就收注入时钟，所以不需要真等：
 
@@ -298,12 +298,12 @@ describe('a per-room window extends the hold without a second deadline', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/lifecycle/idle-delay.test.ts`
 Expected: 第 1 条 FAIL —— `out.destroyed` 在 `71:59:59` 那次就包含了房间（现在两处判定都还只看全局 300 秒）。第 2 条 PASS（旧行为未动）。
 
-- [ ] **Step 3: 加 helper，并让**两处**到期判定都走它**
+- [x] **Step 3: 加 helper，并让**两处**到期判定都走它**
 
 `service.ts` 里，`sweepIdleGrace` 之前加：
 
@@ -339,12 +339,12 @@ Expected: 第 1 条 FAIL —— `out.destroyed` 在 `71:59:59` 那次就包含�
       } else if (now - r.empty_since >= this.effectiveIdleTtlMs(r)) {
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/lifecycle/idle-delay.test.ts`
 Expected: 两条 PASS
 
-- [ ] **Step 5: 验牙 —— 只改一处会怎样（这一刀就是 spec §2.1 的证人）**
+- [x] **Step 5: 验牙 —— 只改一处会怎样（这一刀就是 spec §2.1 的证人）**
 
 临时把 `recoverOnStartup` 那处改回 `this.cfg.roomIdleTtlMs`，加一条测试：
 
@@ -373,7 +373,7 @@ Expected: 两条 PASS
 Run: `node node_modules/vitest/vitest.mjs run tests/lifecycle/idle-delay.test.ts`
 Expected: 第 3 条 **FAIL**（房间被开机判定销毁）。这证明单改清扫不够。然后把 `recoverOnStartup` 的改动**恢复**，重跑三条全绿。
 
-- [ ] **Step 6: 两处取消都清掉旗子**
+- [x] **Step 6: 两处取消都清掉旗子**
 
 `service.ts:229-231`（join 在 `IDLE_GRACE` 内回房）：
 
@@ -395,7 +395,7 @@ Expected: 第 3 条 **FAIL**（房间被开机判定销毁）。这证明单改�
       .run(Date.now(), roomId);
 ```
 
-- [ ] **Step 7: 补中断语义的两条测试（一次性 + ACTIVE 期不中断）**
+- [x] **Step 7: 补中断语义的两条测试（一次性 + ACTIVE 期不中断）**
 
 ```ts
   it('4. a member arriving mid-countdown cancels it AND consumes the arming', async () => {
@@ -437,11 +437,11 @@ Expected: 第 3 条 **FAIL**（房间被开机判定销毁）。这证明单改�
 Run: `node node_modules/vitest/vitest.mjs run tests/lifecycle/idle-delay.test.ts`
 Expected: 五条全 PASS
 
-- [ ] **Step 8: 验牙 —— 只清一处**
+- [x] **Step 8: 验牙 —— 只清一处**
 
 临时把 `cancelEmptyTimer` 里的 `idle_delay_ms=NULL` 去掉，跑第 4 条。若仍绿，说明那条测试走的是 join 路径而不是 `cancelEmptyTimer` —— 此时**必须补一条走 `cancelEmptyTimer` 的腿**（让 `connected.size > 0` 而库里仍是 `IDLE_GRACE`，再 `sweepIdleGrace`），而不是把"绿"当成没问题。
 
-- [ ] **Step 9: 修那句会说谎的日志**
+- [x] **Step 9: 修那句会说谎的日志**
 
 `service.ts:337` 现在打印全局值，装了延迟的房间会留下一条假读数：
 
@@ -457,7 +457,7 @@ Expected: 五条全 PASS
 Run: `node node_modules/vitest/vitest.mjs run tests/lifecycle`
 Expected: 全绿（含既有 `idle-grace.test.ts` 那族）
 
-- [ ] **Step 10: 提交**
+- [x] **Step 10: 提交**
 
 ```bash
 git add src/server/service.ts tests/lifecycle/idle-delay.test.ts
@@ -476,7 +476,7 @@ git commit -m "feat(lifecycle): one source of truth for how long a room is held"
 - Consumes: `rooms.idle_delay_ms`、`effectiveIdleTtlMs`
 - Produces: `IDLE_DELAY_CHOICES_MS: readonly number[]`；`cfg.maxDelayedRooms: number`；`service.setIdleDelay(roomId, creatorToken, ms: number | null): { ok: boolean; code?: string }`；`service.idleDelayFor(roomId, creatorToken): { ok: boolean; idleDelayMs: number | null; code?: string }`；HTTP `POST /api/rooms/:id/delay` 与 `GET /api/rooms/:id/delay`
 
-- [ ] **Step 1: 写失败的测试 —— 白名单、护卡、鉴权各自一条**
+- [x] **Step 1: 写失败的测试 —— 白名单、护卡、鉴权各自一条**
 
 ```ts
 import { describe, expect, it } from 'vitest';
@@ -551,12 +551,12 @@ describe('arming a delayed destroy', () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/governance/idle-delay-guard.test.ts`
 Expected: FAIL —— `IDLE_DELAY_CHOICES_MS` 未定义 / `setIdleDelay` 不是函数
 
-- [ ] **Step 3: 常量与配置**
+- [x] **Step 3: 常量与配置**
 
 `src/lib/constants.ts` 的 `LIMITS` 之后加：
 
@@ -578,7 +578,7 @@ export const IDLE_DELAY_CHOICES_MS = [4, 8, 12, 24, 36, 72].map((h) => h * 3_600
     }),
 ```
 
-- [ ] **Step 4: 服务层装填与读取**
+- [x] **Step 4: 服务层装填与读取**
 
 `service.ts` 里 `destroy` 附近加：
 
@@ -627,7 +627,7 @@ export const IDLE_DELAY_CHOICES_MS = [4, 8, 12, 24, 36, 72].map((h) => h * 3_600
 
 `q.getRoom` 的 SELECT 与 `RoomRow` 类型要带上 `idle_delay_ms`（`service.ts:139-146` 附近与 `db.ts` 的 row interface）。
 
-- [ ] **Step 5: HTTP 两条路由，放在既有 `/destroy` 之后**
+- [x] **Step 5: HTTP 两条路由，放在既有 `/destroy` 之后**
 
 `http-api.ts:185` 之后。注意这条路由天然在 `:161` 的 `authorizeToken` **之后** —— 会话 + creator token 两层都要过：
 
@@ -658,18 +658,18 @@ export const IDLE_DELAY_CHOICES_MS = [4, 8, 12, 24, 36, 72].map((h) => h * 3_600
   }
 ```
 
-- [ ] **Step 6: 跑测试确认通过 + 全量不回归**
+- [x] **Step 6: 跑测试确认通过 + 全量不回归**
 
 Run: `node node_modules/vitest/vitest.mjs run tests/governance tests/lifecycle tests/storage`
 Expected: 全绿
 
-- [ ] **Step 7: 三条验牙**
+- [x] **Step 7: 三条验牙**
 
 1. 把 `IDLE_DELAY_CHOICES_MS.includes(ms)` 换成 `ms > 0` ⇒ 第 1 条红（白名单不是范围）。
 2. 把护卡那句删掉 ⇒ 第 2 条红。
 3. 把 `timingSafeEqual` 换成 `=== room.creator_token.toString('base64url')` 之前，先把 `if (!creatorToken ||` 去掉 ⇒ 第 3 条里空 token 那格红。**每刀单独下、单独跑、看完读数再放回**。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add src/lib/constants.ts src/server/config.ts src/server/service.ts src/server/http-api.ts tests/governance/idle-delay-guard.test.ts
@@ -689,27 +689,27 @@ git commit -m "feat(api): creator-armed delayed destroy, capped per node and whi
 - Consumes: `POST/GET /api/rooms/:id/delay`
 - Produces: `roomclient.setIdleDelay(ms: number | null): Promise<boolean>`、`roomclient.getIdleDelay(): Promise<number | null>`；DOM 契约 `.room-head .delay-btn`（只对房主渲染）、`.delay-dialog .opt[data-ms]`
 
-- [ ] **Step 1: 客户端方法**（照 `roomclient.ts:799-809` 那个 `destroy` 的形状写，`creatorToken` 走 body 不进 URL）
+- [x] **Step 1: 客户端方法**（照 `roomclient.ts:799-809` 那个 `destroy` 的形状写，`creatorToken` 走 body 不进 URL）
 
-- [ ] **Step 2: 写失败的浏览器腿**（渲染后几何，不是 DOM 存在）：
+- [x] **Step 2: 写失败的浏览器腿**（渲染后几何，不是 DOM 存在）：
   - 房主 context 里 `.room-head .delay-btn` 存在、命中区 ≥44×44、中心点在自身形状内；
   - 对端 context 里它**不存在**；
   - 打开弹窗后 `.delay-dialog .opt` 恰好 7 颗（不开启 + 六档），当前值带 `aria-pressed="true"`；
   - 选 8 小时 → 关 → 重开，当前值仍是 8 小时（读的是服务器，不是本地 state）。
 
-- [ ] **Step 3: 跑该腿确认红**（`node scripts/run-browser-tests.mjs --only "delay"`，`--only` 匹配的是 checks 数组里的 label）
+- [x] **Step 3: 跑该腿确认红**（`node scripts/run-browser-tests.mjs --only "delay"`，`--only` 匹配的是 checks 数组里的 label）
 
-- [ ] **Step 4: 实现 `DelayDialog.tsx`** —— 复用 `Modal`（已 portal 到 body），档位从 `IDLE_DELAY_CHOICES_MS` 派生但**标签写死中文小时数**，期望值不许由被测常量算出。
+- [x] **Step 4: 实现 `DelayDialog.tsx`** —— 复用 `Modal`（已 portal 到 body），档位从 `IDLE_DELAY_CHOICES_MS` 派生但**标签写死中文小时数**，期望值不许由被测常量算出。
 
-- [ ] **Step 5: 页眉按钮只对 `client.isCreator` 渲染**，与 `RoomView.tsx:505-509` 那颗销毁按钮同一个门。
+- [x] **Step 5: 页眉按钮只对 `client.isCreator` 渲染**，与 `RoomView.tsx:505-509` 那颗销毁按钮同一个门。
 
-- [ ] **Step 6: CSS 全走 token**，触摸目标 ≥44pt；确认没有第二处 `@media` 重写同一属性。
+- [x] **Step 6: CSS 全走 token**，触摸目标 ≥44pt；确认没有第二处 `@media` 重写同一属性。
 
-- [ ] **Step 7: 跑该腿确认绿**；再跑整条浏览器线确认没踢红既有腿。
+- [x] **Step 7: 跑该腿确认绿**；再跑整条浏览器线确认没踢红既有腿。
 
-- [ ] **Step 8: 验牙**：去掉 `isCreator` 门 ⇒ 对端那条红；把某一档删掉 ⇒ 计数那条红。
+- [x] **Step 8: 验牙**：去掉 `isCreator` 门 ⇒ 对端那条红；把某一档删掉 ⇒ 计数那条红。
 
-- [ ] **Step 9: 提交**
+- [x] **Step 9: 提交**
 
 ---
 
@@ -717,24 +717,24 @@ git commit -m "feat(api): creator-armed delayed destroy, capped per node and whi
 
 **Files:** `docs/SECURITY.md:220`、`README.md`、`README.zh-CN.md`、`docs/ARCHITECTURE.md:104-119`、`docs/DEPLOYMENT.md:189-190`、`CHANGELOG.md`、`docs/TEST-REPORT.md`、`docs/DEBT.md`
 
-- [ ] **Step 1:** `SECURITY.md:220` 那句改成"默认 300 秒的有期限例外；房主可显式延到最长 72 小时，且需逐次装填"。
-- [ ] **Step 2:** README 两份的"无人即销毁"加限定语"无人 **且到期** 即销毁"。
-- [ ] **Step 3:** `ARCHITECTURE.md` 生命周期一节补：每房窗口、`effectiveIdleTtlMs` 单一真相来源、成链迁移。
-- [ ] **Step 4:** `DEPLOYMENT.md` 环境变量表加 `MAX_DELAYED_ROOMS`，并写明 `ROOM_IDLE_TTL_SECONDS` 的 24h 硬顶只管全局默认值。
-- [ ] **Step 5:** `CHANGELOG.md` 一条 Added；`TEST-REPORT.md` 新增一节记本轮逐条读数与每把刀。
-- [ ] **Step 6:** `DEBT.md` 登记未验项（72h 房对 `TEMP_BYTES_MAX_NODE` 的压力无读数；PhotoSwipe 共存未验属计划二）。
-- [ ] **Step 7:** 逐条把文档承诺对回代码扫一遍（正反两向），提交。
+- [x] **Step 1:** `SECURITY.md:220` 那句改成"默认 300 秒的有期限例外；房主可显式延到最长 72 小时，且需逐次装填"。
+- [x] **Step 2:** README 两份的"无人即销毁"加限定语"无人 **且到期** 即销毁"。
+- [x] **Step 3:** `ARCHITECTURE.md` 生命周期一节补：每房窗口、`effectiveIdleTtlMs` 单一真相来源、成链迁移。
+- [x] **Step 4:** `DEPLOYMENT.md` 环境变量表加 `MAX_DELAYED_ROOMS`，并写明 `ROOM_IDLE_TTL_SECONDS` 的 24h 硬顶只管全局默认值。
+- [x] **Step 5:** `CHANGELOG.md` 一条 Added；`TEST-REPORT.md` 新增一节记本轮逐条读数与每把刀。
+- [x] **Step 6:** `DEBT.md` 登记未验项（72h 房对 `TEMP_BYTES_MAX_NODE` 的压力无读数；PhotoSwipe 共存未验属计划二）。
+- [x] **Step 7:** 逐条把文档承诺对回代码扫一遍（正反两向），提交。
 
 ---
 
 ## Task 6: 台面重认证与交付
 
-- [ ] **Step 1:** 产品改动前单跑一遍整跑当改前基线（红就停手报红的腿）。
-- [ ] **Step 2:** `node node_modules/next/dist/bin/next build && node node_modules/typescript/bin/tsc -p tsconfig.server.json`。
-- [ ] **Step 3:** 整条浏览器线一遍（新增腿计入总数，两来源各一遍）。
-- [ ] **Step 4:** `node scripts/build-release.mjs --no-build` 重封交付包；核对包内文档与 HEAD 逐个 `git hash-object` 一致、文档闭包审计通过。
-- [ ] **Step 5:** `node scripts/run-gates.mjs` **前台单条跑**（不许 sleep 轮询 —— 那会 fork 打满进程表并挤崩时序腿），要 `16 passed, 0 failed, 0 skipped`。
-- [ ] **Step 6:** 崩或红的那一遍**不交任何读数**；结论只来自真跑过判据的那一遍。
+- [ ] **Step 1:** 产品改动前单跑一遍整跑当改前基线（红就停手报红的腿）。**本轮未做**，偏离已记在 TEST-REPORT §7.14；替代对照是上一轮收尾的 `gates-T`/`gates-V` 与本轮改后的 `gates-W`。
+- [x] **Step 2:** `node node_modules/next/dist/bin/next build && node node_modules/typescript/bin/tsc -p tsconfig.server.json`。
+- [x] **Step 3:** 整条浏览器线一遍（新增腿计入总数，两来源各一遍）。
+- [x] **Step 4:** `node scripts/build-release.mjs --no-build` 重封交付包；核对包内文档与 HEAD 逐个 `git hash-object` 一致、文档闭包审计通过。
+- [x] **Step 5:** `node scripts/run-gates.mjs` **前台单条跑**（不许 sleep 轮询 —— 那会 fork 打满进程表并挤崩时序腿），要 `16 passed, 0 failed, 0 skipped`。
+- [x] **Step 6:** 崩或红的那一遍**不交任何读数**；结论只来自真跑过判据的那一遍。
 - [ ] **Step 7:** 移动/新增 tag 与提交由用户拍板；推送归用户。
 
 ---

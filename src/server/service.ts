@@ -1143,7 +1143,8 @@ export class RoomService extends EventEmitter {
     this.db.raw.prepare('DELETE FROM session_tokens').run();
     for (const r of active) this.enterIdleGrace(r.id, now);
     // A grace clocked before the restart keeps its own start time, so downtime counts against
-    // the window rather than resetting it: 5 minutes is a wall-clock promise, not a uptime one.
+    // the window rather than resetting it: the recovery window is a wall-clock promise, not an
+    // uptime one -- and that holds equally for an owner-armed multi-hour window.
     const inGrace = this.db.raw
       .prepare("SELECT id, empty_since, idle_delay_ms FROM rooms WHERE status='IDLE_GRACE'")
       .all() as { id: string; empty_since: number | null; idle_delay_ms: number | null }[];

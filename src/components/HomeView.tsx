@@ -138,7 +138,7 @@ export default function HomeView() {
       <main className="hero">
         <span className="eyebrow">TEMPORARY · 临时聊天室 · 免注册</span>
         <h1 className="headline">创建即聊，离开即焚。</h1>
-        <p className="sub">无需账号，生成房间即可分享；端到端加密，最后一人离开 5 分钟后自动销毁。</p>
+        <p className="sub">无需账号，生成房间即可分享；端到端加密，最后一人离开后倒计时销毁（默认 5 分钟，房主可一次性延长）。</p>
         <div className="btnrow">
           <button type="button" className="btn btn-primary" onClick={() => { if (guard({ kind: 'create' })) void create(); }} disabled={busy}>
             {busy ? '创建中…' : '创建聊天室'}

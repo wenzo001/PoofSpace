@@ -92,7 +92,8 @@ nonce = 版本(1) ‖ slot(3) ‖ gen(2) ‖ counter(6)
 
 `meta`（仅 `schema_version`）、`rooms`（状态 `ACTIVE|IDLE_GRACE|DESTROYING|DESTROYED`、`join_key`、上限、`empty_since`）、`slots`（槽位、`gen`、最后心跳、昵称摘要）、`messages`（`seq`、`client_msg_id`、密文、nonce、`UNIQUE(room_id, client_msg_id)`）、`attachments` / `attachment_chunks`（索引与落盘状态）、`session_tokens`（会话令牌）。**没有**房间目录表、创建者映射表、审计表或索引表——七张表就是全部，且每一张都挂在某个 `room_id` 上、随房间一起被清干净。
 
-- 这是一个**临时运行库**：允许为活跃房间或仍在 5 分钟恢复期内的房间保留密文，不允许长期保留任何房间记录；
+- 这是一个**临时运行库**：允许为活跃房间或仍在恢复期内（默认 300 秒；房主可为下一次无人显式装填到
+  最长 72 小时，见 §5 第 3 条）的房间保留密文，不允许长期保留任何房间记录；
 - WAL + `synchronous=NORMAL` + `busy_timeout=5000` + `secure_delete=ON` + 外键 `ON DELETE CASCADE`；
 - 每次销毁 `wal_checkpoint(TRUNCATE)`，空闲页超过 `VACUUM_FREELIST_PAGES` 时再 `VACUUM` 重写文件——只执行 `DELETE` 不等于受控残留已清除，自由列表里的旧页面仍可能被读到；
 - 序列号、槽位、房间状态变更都在事务里做，销毁靠状态机 CAS 推进，重复销毁幂等；
@@ -110,7 +111,9 @@ nonce = 版本(1) ‖ slot(3) ‖ gen(2) ‖ counter(6)
    浏览器刷新、服务重启都不能把它救回来。**一间房可以被房主显式延长**：`rooms.idle_delay_ms` 可空，
    到期时刻**永远不落库**，一律由 `empty_since + effectiveIdleTtlMs(room)` 现算，而全服务只有
    `effectiveIdleTtlMs` 一处知道"一间房此刻适用多长窗口"——清扫与开机恢复两处判定都必须走它，
-   否则一次重启就会把装着 72 小时的房间按 300 秒销毁掉（这条有专门的腿与刀）。schema 迁移**成链**
+   否则一次重启就会把装着 72 小时的房间按 300 秒销毁掉（这条有专门的腿与刀）。装填凭据的搬运方向也是
+   定死的：写走 `POST /delay` 的 **body**，读走 `GET /delay` 的 **`x-poof-creator` 头**，两处都不进 URL ——
+   URL 是会落进访问日志与浏览器历史的那一格。schema 迁移**成链**
    `v1→v2→v3`，各支只跳自己那一跳，v1 走两跳；`ADD COLUMN` 可空、原地完成，不重建表；
 4. `DESTROYING`：拒绝加入/写消息/新上传/下载，终止连接与在飞任务（`pendingUploadTtlMs` 回收孤儿上传）；
 5. 删 `rooms/<roomId>/**`（含未完成分片与 `.tmp`）→ **确认目录真空**才删库中该房间的行（含 `rooms` 行本身）
