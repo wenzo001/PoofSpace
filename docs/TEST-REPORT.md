@@ -849,6 +849,16 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
 **交付读数（本轮最后一个包）**：`scratch/gates-W.log` —— **16 passed / 0 failed / 0 skipped**，
 `GATES_EXIT=0`；包内文档与 HEAD 逐个 `git hash-object` 全等（`DIFF` 0 行），`packages 61`，
 两份冒烟 `stagedCopyVerified true` / `extractedTarballVerified true`。
-上一轮那条抖动腿（D27 `pinned list holds on incoming`）这一遍**没有红** —— 35 条腿 × 两来源全过。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+上一轮那条抖动腿（D27 `pinned list holds on incoming`）这一遍**没有红** —— 35 条腿 × 两来源全过。
+
+**台面之后又单跑了一遍整条浏览器线（同一个交付包，未改任何源码）**：`scratch/lane-35a.log`
+—— **66 行 PASS 之外有 3 条红**：`pinned list holds on incoming`（`inbound-frame never`，采满 8 s）、
+`parked list does not step backwards…`（同族）、以及 `an open dialog does not travel with the list behind it`
+红在**建房 30 秒预算超时**、dump 是 `composer=false, bubbles=0, modals=0`（D20 那一族换了条腿现形）。
+三条**各自单跑全绿**：dialog 腿 `scrim on body=true / 列表移动 400px 而弹窗移动 0px`，parked 腿
+`0px before, 0px after, 末行在屏内=true`，pinned 腿本轮台面里也是绿的。
+⇒ 新证据只支持"这三条在整跑负载下一起抖"，不支持任何一条产品缺陷；也没有为此调过任何预算。
+两条新腿在同一遍里各自绿：`the identity pill centers its content`（wide L12/R12/T7/B7、narrow 44×44 全 7px）
+与 `the creator can arm a delayed destroy`（peer open=0/tiers=0、6 档 211×44、标签逐字对）。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 
