@@ -263,7 +263,7 @@ export const IDLE_DELAY_CHOICES_MS = [4, 8, 12, 24, 36, 72].map((h) => h * 3_600
 | `MAX_DELAYED_ROOMS` 到顶 ⇒ 第 N+1 次装填被拒且文案不含数字 | 上限改成 `Infinity` ⇒ 红 |
 | `MAX_DELAYED_ROOMS=0` ⇒ 整条功能关死 | 删掉 0 的特判 ⇒ 红 |
 | 非房主 token ⇒ `notCreator` | 换成比 `is_creator` 标志位 ⇒ 红（且这是纪律本身） |
-| **B2 从事实派生**：把 staged 包里 `node_modules/photoswipe` 挪走 ⇒ B2 必须红并点名它 | 现状（手抄单向名单）下这一刀是**绿的** —— 那正是 2.3 要修的没牙 |
+| **B2 从事实派生**：**把 pack 清单里的 `photoswipe` 去掉**（等价于"声明了但打包器没搬进去"）⇒ B2 必须红并点名它。实测：`missing=photoswipe`、`0 passed, 1 failed` | 现状（手抄单向名单）下这一刀是**绿的** —— 那正是 2.3 要修的没牙。**注意刀的形状**：原写"把 staged 包里 `node_modules/photoswipe` 目录挪走"**打不红 B2** —— B2 审的是"包内 `package.json` 声明 ↔ `build-info.json` 打包时记录的清单"，不是打包之后目录的当前状态（实测挪走目录后仍 `missing=none` 绿）。对一个只进客户端 bundle 的依赖，"目录在不在"本来也不是它运行时的必要条件 |
 
 **浏览器线**
 

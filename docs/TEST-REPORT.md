@@ -879,16 +879,32 @@ list/fit/zoomed）。桌面滚轮 2481px、翻页态计数器 `2 / 2`、手机�
    `to include 'idle_delay_ms'`，v1 那条照绿 —— 与上一轮"v1 分支摘一跳"配成两半）。
 3. **"第 N+1 次装填被拒且文案不含数字"这一半没有判据** ⇒ 登记为 D41：现在只钉了返回码
    `DELAY_CAPACITY_FULL`，用户界面那句 `服务器拒绝了这次设置` 没有任何东西在读它有没有数字。
+   同一行还有一把**打不存在的刀**：spec 写"删掉 `MAX_DELAYED_ROOMS=0` 的特判 ⇒ 红"，实现里**没有 0 的特判** ——
+   `armed >= max` 在 `max=0` 时对任何装填都成立，0 是不等式的自然结果而不是分支，所以那一刀无处下；
+   行为本身由治理线第 4 条判据钉住（`0` ⇒ 一律 `DELAY_CAPACITY_FULL`，且清空仍然允许）。
 
 **spec §10 最后一把刀（延迟房仍占名额）**：把 `IDLE_GRACE` 从 `SLOT_HOLDING_STATUSES` 里摘掉 ⇒
 `tests/capacity/room-capacity` 第 3 条红在 `expected 2 to be 3`（其余 48 条全绿）。
 这条腿不是本轮新写的，但它就是"装填过的房间照常占名额"这句话的守卫 —— 名单一字未改，所以不需要新判据，
 需要的是确认旧判据真的在读这一格。
 
+**spec §10 那条 B2 的刀，形状要改**（本轮最后一件对表工作）：spec 写的是"把 staged 包里
+`node_modules/photoswipe` 挪走 ⇒ B2 必须红并点名它"。**实测挪走目录之后 B2 照绿**
+（`61 packages … missing=none`，`scratch/knife-B2-photoswipe.log`）—— 不是没牙，而是刀打错了对象：
+B2 比的是"包内 `package.json` 的 `dependencies` ↔ `build-info.json` 里打包当时记录的清单"，
+它审的是**那一次打包**，不是打包之后目录的当前状态。换成真正等价的那一刀 —— 把 `photoswipe` 从
+pack 清单里去掉（等价于"声明了但打包器没搬进去"，也正是上一轮把名单改成派生的动机）—— 立刻红：
+`60 packages … missing=photoswipe`、`0 passed, 1 failed`（`scratch/knife-B2-manifest.log`），
+恢复后 61 包。⇒ spec 那一行已就地改正；对一个只进客户端 bundle 的依赖，"目录此刻在不在"本来也不是
+它的运行时必要条件（B3 起的是打包后的服务端与 `.next`，缺图会在浏览器腿上现形）。
+
 **定稿包的台面读数**：`scratch/gates-AA.log` —— **15 / 1 / 0**，红的还是 D27 那条
 （`inbound-frame seen at neverms`、采满 8 s），35 条腿里其余 34 条全过；包内文档与 HEAD 全等（`DIFF` 0）。
 它前一遍 `gates-X` 是 **16 / 0 / 0**（同一个源码树，只隔一次文档重打包）。
 ⇒ 交付结论按 §7.13 同一条口径写：**"底部不抖动"不是本轮认证过的主张**（D27 的结案读数仍未拿到），
-本轮认证的是"延迟销毁这 15 条判据 + 10 把刀 + 35 条腿里与本轮相关的每一条各自绿"。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
+本轮认证的是"延迟销毁这 15 条判据 + 10 把刀 + 35 条腿里与本轮相关的每一条各自绿"。
+下一遍（`scratch/gates-BB.log`，同一份源码、只隔一次文档重打包）是 **16 / 0 / 0**，D27 那一条没有红；
+两遍都记在这里，因为**"哪一遍跑在哪个包上"是历史事实，而"本文档所在那个包的最终读数"会被下一次重打包改掉** ——
+后者按 §7.13 的口径进注解标签，不进随包报告。包内 9 份随包文档（中英 README、CHANGELOG、LICENSE、
 `docs/` 五份）与 HEAD 逐个 `git hash-object` 全等，`doc references: closed over 8 shipped markdown files`。
 
