@@ -227,7 +227,7 @@ export class RoomService extends EventEmitter {
         // Rejoining inside the recovery window cancels the countdown and returns *this* room:
         // same id, same head_seq, same ciphertext. It is not a freshly created room.
         this.db.raw
-          .prepare("UPDATE rooms SET status='ACTIVE', empty_since=NULL, updated_at=? WHERE id=?")
+          .prepare("UPDATE rooms SET status='ACTIVE', empty_since=NULL, idle_delay_ms=NULL, updated_at=? WHERE id=?")
           .run(now, input.roomId);
       }
       const connected = this.db.raw
@@ -334,7 +334,10 @@ export class RoomService extends EventEmitter {
       .run(now, now, roomId).changes;
     if (changed) {
       // Only the first transition is worth a line; the sweep retries this every tick otherwise.
-      logger.info('room entered idle grace', { windowMs: this.cfg.roomIdleTtlMs });
+      // The number printed has to be the window *this* room is held for: writing the node default
+      // next to a 72-hour arming would leave a reading in the operator's log that never happened.
+      const held = this.db.raw.prepare('SELECT idle_delay_ms FROM rooms WHERE id=?').get(roomId) as { idle_delay_ms: number | null };
+      logger.info('room entered idle grace', { windowMs: this.effectiveIdleTtlMs(held) });
     }
   }
 
@@ -895,7 +898,7 @@ export class RoomService extends EventEmitter {
   private cancelEmptyTimer(roomId: string, mem: RoomMemory): void {
     if (mem.connected.size === 0) return;
     this.db.raw
-      .prepare("UPDATE rooms SET status='ACTIVE', empty_since=NULL, updated_at=? WHERE id=? AND status='IDLE_GRACE'")
+      .prepare("UPDATE rooms SET status='ACTIVE', empty_since=NULL, idle_delay_ms=NULL, updated_at=? WHERE id=? AND status='IDLE_GRACE'")
       .run(Date.now(), roomId);
   }
 
@@ -904,10 +907,20 @@ export class RoomService extends EventEmitter {
    * moment the room became idle and is written once, so neither a restart nor a repeated sweep
    * can stretch the window; the expiry transition into DESTROYING is the point of no return.
    */
+  /**
+   * The window a room is actually held for right now. Both places that decide expiry -- the sweep
+   * and startup recovery -- have to ask this one question, because a restart that compared against
+   * the node default would destroy every armed room the moment the process came back up, which is
+   * exactly the reading no test on the sweep can see.
+   */
+  private effectiveIdleTtlMs(room: { idle_delay_ms: number | null }): number {
+    return room.idle_delay_ms ?? this.cfg.roomIdleTtlMs;
+  }
+
   sweepIdleGrace(now = Date.now()): { cancelled: number; destroyed: string[] } {
     const rows = this.db.raw
-      .prepare("SELECT id, empty_since FROM rooms WHERE status='IDLE_GRACE'")
-      .all() as { id: string; empty_since: number | null }[];
+      .prepare("SELECT id, empty_since, idle_delay_ms FROM rooms WHERE status='IDLE_GRACE'")
+      .all() as { id: string; empty_since: number | null; idle_delay_ms: number | null }[];
     const destroyed: string[] = [];
     let cancelled = 0;
     for (const r of rows) {
@@ -922,7 +935,7 @@ export class RoomService extends EventEmitter {
         this.db.raw.prepare('UPDATE rooms SET empty_since=?, updated_at=? WHERE id=?').run(now, now, r.id);
         continue;
       }
-      if (now - r.empty_since >= this.cfg.roomIdleTtlMs) {
+      if (now - r.empty_since >= this.effectiveIdleTtlMs(r)) {
         void this.destroy(r.id, 'idle');
         destroyed.push(r.id);
       }
@@ -1083,13 +1096,13 @@ export class RoomService extends EventEmitter {
     // A grace clocked before the restart keeps its own start time, so downtime counts against
     // the window rather than resetting it: 5 minutes is a wall-clock promise, not a uptime one.
     const inGrace = this.db.raw
-      .prepare("SELECT id, empty_since FROM rooms WHERE status='IDLE_GRACE'")
-      .all() as { id: string; empty_since: number | null }[];
+      .prepare("SELECT id, empty_since, idle_delay_ms FROM rooms WHERE status='IDLE_GRACE'")
+      .all() as { id: string; empty_since: number | null; idle_delay_ms: number | null }[];
     const expired: string[] = [];
     for (const r of inGrace) {
       if (r.empty_since === null) {
         this.db.raw.prepare('UPDATE rooms SET empty_since=?, updated_at=? WHERE id=?').run(now, now, r.id);
-      } else if (now - r.empty_since >= this.cfg.roomIdleTtlMs) {
+      } else if (now - r.empty_since >= this.effectiveIdleTtlMs(r)) {
         expired.push(r.id);
       }
     }
