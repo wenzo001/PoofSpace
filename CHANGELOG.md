@@ -21,14 +21,19 @@ claims in `docs/DEBT.md`.
   a config file at all. `tests/governance/node-version-claims-agree.test.ts` collides the deployment table,
   `engines.node`, the matrix and vite's own engines, and makes "this arm runs the suite" an if-and-only-if
   with "the toolchain loads on this arm" -- so flipping `tests: false` cannot be used to silence a failing
-  leg, and raising every arm above the floor cannot be used to stop exercising it. Three judgements, six
-  knives, each red only on its own leg; see `docs/TEST-REPORT.md` 7.16.
+  leg, and raising every arm above the floor cannot be used to stop exercising it. A fourth leg checks
+  the shape of every `run:` / `if:` value, because a plain scalar carrying ": " makes GitHub refuse the
+  whole workflow -- the run comes back with zero jobs while all three floor checks still read green.
+  Four judgements, seven knives, each red only on its own leg; see `docs/TEST-REPORT.md` 7.16.
 
 ### Fixed
 
 - GitHub Actions' `verify (20.9.0)` arm has failed with `ERR_REQUIRE_ESM` on every run since the workflow
   existed -- five for five. npm had been printing the reason at install time (`EBADENGINE` for
-  `vite@7.3.7`, which requires `^20.19.0 || >=22.12.0`) and nothing read it.
+  `vite@7.3.7`, which requires `^20.19.0 || >=22.12.0`) and nothing read it. The first cut at this fix
+  then produced a run with zero jobs: the skip's warning was written as a plain `run:` scalar carrying
+  `": "`, which is a YAML mapping indicator, so GitHub accepted the push and refused the file. Both
+  shapes are covered now -- the arm skips visibly, and judgement 4 rejects that scalar form.
 
 ## 1.1.1 — 2026-10-18
 

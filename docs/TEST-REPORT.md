@@ -984,7 +984,7 @@ T6 从上一遍的 `5 files, 36 tests` 变成 `6 files, 40 tests`（新增的就
 `npm test` 那一步 `if: matrix.tests`；**跳过的那一臂必须自己喊**（`::warning::` 明说"这一臂没跑测试，只验了构建与产物启动"），
 否则一个绿色会被读成"测试也过了"。`docs/DEPLOYMENT.md` 那一格拆成两句：运行 >= 20.9、跑测试套件 >= 20.19。
 
-**新判据**：`tests/governance/node-version-claims-agree.test.ts`（T6 车道）三条，把上面那几处对撞成一次运行。
+**新判据**：`tests/governance/node-version-claims-agree.test.ts`（T6 车道）四条，把上面那几处对撞成一次运行。
 矩阵里的 `tests` 之所以写成**数据而不是散文**，正是为了让这条判据能读；而且它读的是双向：
 **某一臂跑测试 ⟺ 工具链在那一臂装得起来** —— 把 `tests` 改成 false 去消音会红，改成 true 去硬撑也会红。
 
@@ -993,12 +993,25 @@ T6 从上一遍的 `5 files, 36 tests` 变成 `6 files, 40 tests`（新增的就
 | 1 | 部署表承诺的两个下限，等于真实存在的两个下限 | 把表里"运行 >= 20.9"改成 `20.10` | 只红 `[1.]` |
 | 2 | 每个臂都不低于运行下限，且**至少有一个臂正好坐在下限上** | 一把加 `18.x` 臂；另一把把 `20.9.0` 改成 `20.11.0`（于是没有臂坐在下限上） | 两把都只红 `[2.]` |
 | 3 | 每一臂都声明了自己的意图，且 `tests` 与工具链下限一致 | 三把：capable 臂改成 `tests: false`；20.9 臂改成 `true`；删掉一臂的 `tests:` 行 | 三把都只红 `[3.]` |
+| 4 | 每个 `run:` / `if:` 的值都写成不会破坏 workflow 解析的形态 | 把 `run: npm test` 换成一个含 `": "` 的 plain scalar（就是我第一版犯的错） | 只红 `[4.]` |
 
-控制跑：**3 legs，0 not passed**；六把刀**各自只红自己那一格**（`scratch/knife-version-claims.mjs`，
+控制跑：**4 legs，0 not passed**；七把刀**各自只红自己那一格**（`scratch/knife-version-claims.mjs`，
 `finally` 里把 `ci.yml` / `DEPLOYMENT.md` / `package.json` 三份原文写回，跑完 `git status` 只剩预期的改动）。
 判据 2 里"必须有一个臂正好坐在下限上"是这一族的关键：否则"支持 >= 20.9"可以靠把所有臂都抬到 24 而**静默地不再被验**。
 
-**边界要写清**：这条判据要读 `node_modules/vite/package.json` ⇒ 只在装了 devDependencies 的地方跑得起来
-（CI 的 `npm ci` 有；交付产物里没有测试，本来也不跑它）。
-**并且本节没有"CI 绿了"这句**：那一臂的真实结果只能等这一发改上去之后那一跑说了算 —— 读数记在推送后的核验里，不预先写进报告。
+**我自己在这条线上又摔了一次，摔法值得记**：第一版把警告写成 `run: echo "…node ${{ matrix.node }}: the installed…"` ——
+plain scalar 里出现了 `": "`，那是 YAML 的映射符 ⇒ GitHub **收下推送但拒收文件**，那一跑（`39100223650`）**0 个 job**、
+`--log-failed` 直接 "log not found"。这不是"某一臂红了"，是整条 workflow 没被解析，而上面那三条判据**全都读绿**
+（正则不认 YAML 合法性）⇒ 于是补了判据 4。判据读的是散文时，"文件能不能被真正的解析器收下"要单独有一格守着。
+
+**CI 的最终读数**（`39101072209`，跑在 `f414392`）：run conclusion `success`；
+`verify (20.9.0, false)` 与 `verify (24.x, true)` 两臂都成功，且低版本那一臂的步骤表里
+`Full test suite` 明明白白是 **skipped**（不是消失），另一步打印的 `::warning::` 落成了 job 注解
+（`annotations` API 读到 `warning: npm test was NOT run on node 20.9.0 - …`）⇒ "这一臂没跑测试"是**看得见的**，
+绿色不会被读成"测试也在这里过了"。
+
+**边界**：判据 1、3 要读 `node_modules/vite/package.json` ⇒ 只在装了 devDependencies 的地方跑得起来
+（CI 的 `npm ci` 有；交付产物里没有测试，本来也不跑它）。公司线那边两份文件都在（`ci.yml` 与 `DEPLOYMENT.md` 是共享的），
+但 `.gitlab-ci.yml` 的完整 vitest job 默认不开（"需要 devDependencies 且跑得慢，默认只在需要时开"）⇒ 这一格真正每次执行的地方
+是 GitHub Actions 的 `24.x` 臂与本地台面 T6。
 
