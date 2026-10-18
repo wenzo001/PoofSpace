@@ -60,4 +60,5 @@ jobs:
         run: npm test
       - name: This arm does not run the test suite
         if: ${{ !matrix.tests }}
-        run: echo "::warning title=tests skipped on this arm::npm test was NOT run on node ${{ matrix.node }}: the installed vite requires a newer Node than this arm. This arm proves the product typechecks, builds and boots from the packaged artifact -- nothing more."
+        run: |
+          echo "::warning title=tests skipped on this arm::npm test was NOT run on node ${{ matrix.node }} - the installed vite requires a newer Node than this arm. This arm proves the product typechecks, builds and boots from the packaged artifact, nothing more."

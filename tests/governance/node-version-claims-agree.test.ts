@@ -75,7 +75,25 @@ function claim(row: string, label: string): Floor {
   return floorOf(value, `deployment ${label} claim`);
 }
 
-const arms = parseArms(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
+const ciYaml = fs.readFileSync('.github/workflows/ci.yml', 'utf8');
+const arms = parseArms(ciYaml);
+
+/**
+ * This file reads the workflow with regexes, which cannot tell valid YAML from a file GitHub will
+ * refuse to parse -- and one such line cost a run with zero jobs: a plain `run:` value containing
+ * ": " is a mapping indicator landing in the middle of a value. So the shape itself is checked.
+ * The safe forms are a block scalar (`|`, `>`) or a quoted scalar.
+ */
+function unsafePlainScalars(ciYaml: string): string[] {
+  const bad: string[] = [];
+  ciYaml.split('\n').forEach((line) => {
+    const value = /^\s*(?:run|if):\s+(\S.*)$/.exec(line)?.[1];
+    if (!value) return;
+    if (/^[|>"']/.test(value)) return;
+    if (value.includes(': ') || value.includes(' #')) bad.push(value.slice(0, 90));
+  });
+  return bad;
+}
 
 describe('the Node version floors agree across the four places that state one', () => {
   it('1. the deployment table promises the two floors that actually exist', () => {
@@ -99,5 +117,11 @@ describe('the Node version floors agree across the four places that state one', 
       .filter((a) => a.runsTests !== atLeast(a.version, toolchainFloor))
       .map((a) => `${a.label}: tests=${String(a.runsTests)} but vite needs ${toolchainFloor.join('.')}`);
     expect(wrong).toEqual([]);
+  });
+
+  it('4. every run/if value is a form that cannot break the workflow parse', () => {
+    // Zero jobs on a run is what "GitHub never accepted this file" looks like; the floors above
+    // would all still read green here, so this shape gets its own leg.
+    expect(unsafePlainScalars(ciYaml)).toEqual([]);
   });
 });
