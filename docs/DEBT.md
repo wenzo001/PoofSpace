@@ -53,6 +53,8 @@
 
 | D41 | "名额到顶时的拒绝文案不含数字" | 治理判据钉的是**返回码**（`DELAY_CAPACITY_FULL`）与服务层不泄露计数；界面上那句 `服务器拒绝了这次设置` 由 `DelayDialog` 写死，**没有任何判据在读它**（spec §10 治理表要求"被拒且文案不含数字"，数字那一半没覆盖） | OPEN | 结案读数：浏览器腿把装填做到第 N+1 次，断言界面出现的那句 `=== '服务器拒绝了这次设置'`（逐字），并另加一条静态判据扫 `src/components/DelayDialog.tsx` 里所有面向用户的拒绝文案 `not.match(/[0-9]/)`；在那之前不许把"拒绝不泄露容量"写成已验 |
 
+| D42 | 公开线守卫的四条判据**每一遍都在场** | `tests/governance/public-line-carries-no-company-config.test.ts` 的 1、2 两格只要 `refs/heads/main` 就能跑；3（正向对照：同一把 `git grep` 在公司线上必须找得到那个主机名片段，判据里写作 `l[h]cz`）和 4（手写名单与两线真实差集相撞）需要本地有 `refs/heads/internal-deploy`。GitHub Actions 那份 checkout 里没有这条 ref ⇒ 那两格在 CI 是 **skipped 而不是 passed**，"名单不会烂"这一半在公开流水线上没有被证过 | PARTIAL | 结案读数：这一文件在 CI 打印 `4 passed (4)`。要做到就得让公开仓库的流水线去 fetch 内网分支（`git fetch lc internal-deploy:internal-deploy`），而公开流水线不该依赖内网 —— 所以真正的结案路径是把 3、4 两格挪到只有本地或公司 runner 会跑的 lane，并在台面报告里点名"这一遍 3/4 在场"。在那之前不许把"名单不会烂"写成 CI 已验 |
+
 ## 用法
 
 - 每条欠账**修掉之后不许直接撤账**：先把它对应的判据（或反向证人）落到门禁里、跑出绿，再把那一行改成 `CLOSED` 并写明判据名。

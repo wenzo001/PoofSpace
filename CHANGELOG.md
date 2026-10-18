@@ -13,6 +13,22 @@ claims in `docs/DEBT.md`.
 
 ### Added
 
+- Whether the public line is clear of company deployment configuration is now a judgement instead of a
+  habit. `tests/governance/public-line-carries-no-company-config.test.ts` (T6 lane) names the refs it
+  audits rather than reading `HEAD` -- both lines share one working tree now, so whichever branch
+  happens to be checked out says nothing about which line is being audited. It asserts that none of the
+  twelve company-only paths is tracked on the public ref, that no tracked text on it contains the
+  company host, that the same content scan *does* find that host on the company line (a control: a
+  blind grep must not read as clean), and that the hand-written path list still covers the real
+  company-only difference -- which is what stops the list from rotting in either direction. Four
+  judgements, four knives, each one red only on its own leg; evidence in `docs/TEST-REPORT.md` §7.15.
+  The control and the list-collision legs need the company ref locally, so on GitHub Actions they
+  report `skipped`, and that gap is registered as `docs/DEBT.md` D42 rather than counted as a pass.
+
+## 1.1.0 — 2026-10-18
+
+### Added
+
 - The room owner can arm a one-time longer recovery window for the next absence: 4/8/12/24/36/72
   hours, chosen from a `延时` button in the room header that only the creator sees. The armed tier is
   highlighted (`aria-pressed` plus a teal border, tokens only), so reopening the dialog answers
