@@ -11,6 +11,8 @@ claims in `docs/DEBT.md`.
 
 ## Unreleased
 
+## 1.1.1 — 2026-10-18
+
 ### Added
 
 - Whether the public line is clear of company deployment configuration is now a judgement instead of a
