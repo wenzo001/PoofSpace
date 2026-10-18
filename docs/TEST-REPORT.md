@@ -962,3 +962,43 @@ T6 从上一遍的 `5 files, 36 tests` 变成 `6 files, 40 tests`（新增的就
 **没做到的一格进了台账**：3、4 两格需要本地存在 `refs/heads/internal-deploy`，GitHub Actions 的 checkout 里没有 ⇒
 那两格在公开流水线上是 skipped 不是 passed。按"SKIP 不是通过"的口径记成 **D42（PARTIAL）**，不许把"名单不会烂"写成 CI 已验。
 
+### 7.16 第十轮：GitHub CI 那一臂红了 5 次，红的是工具链不是产品（2026-10-18）
+
+**起因是用户的一张截图**：`CI / verify (20.9.0)` 失败、`verify (24.x)` 通过。**先归因再动手**，三条读数：
+① `gh run view --log-failed` 是 `ERR_REQUIRE_ESM`（vitest 的 `config.cjs` 用 `require()` 载 Vite 的 ESM 入口，
+而 `require(esm)` 要到 Node 20.19 / 22.12 才有）；② `npm ci` 那一步从**第一次**跑起就在打印
+`EBADENGINE Unsupported engine { package: 'vite@7.3.7', required: { node: '^20.19.0 || >=22.12.0' } }`；
+③ 仓库一共 5 次 CI 运行，**5 次都是同一臂、同一签名**（最早 `38709142582`，2026-10-15）
+⇒ **不是本批发引入的，是那一臂从建出来那天就没绿过**。
+
+**要紧的一步是分辨红的是哪一格**。那一臂的逐步结论是：`Typecheck` ✓、`Build` ✓、
+`Audit the deployable artifact`（`npm run release -- --dry-run`，会把暂存树与解包后的 tarball 真起来一遍并打 API+WS）✓、
+只有 `Full test suite` ✗。⇒ **产品在 20.9.0 上跑得起来这件事是被验到的**，跑不动的只是测试工具链。
+所以不许把 20.9 那一臂删掉或抬走 —— 那是把一条已经验到的能力收回去。
+
+**四处口径本来就互不相认**（版本号这一族撞的就是"两份账"）：
+`package.json` 的 `engines.node: >=20.9.0`、CI 矩阵 `['20.9.0','24.x']`、`docs/DEPLOYMENT.md` 那句"Node.js >= 20.9"、
+`.node-version` 与公司镜像 `node:24.20.0-pnpm`，以及真正决定测试能否加载的 `vite@7.3.7` 自己的 engines。
+
+**修法（用户拍的"20.9 臂只验运行"）**：矩阵从一行 `node: [...]` 改成**带意图的数据**（每个臂 `node` + `tests`），
+`npm test` 那一步 `if: matrix.tests`；**跳过的那一臂必须自己喊**（`::warning::` 明说"这一臂没跑测试，只验了构建与产物启动"），
+否则一个绿色会被读成"测试也过了"。`docs/DEPLOYMENT.md` 那一格拆成两句：运行 >= 20.9、跑测试套件 >= 20.19。
+
+**新判据**：`tests/governance/node-version-claims-agree.test.ts`（T6 车道）三条，把上面那几处对撞成一次运行。
+矩阵里的 `tests` 之所以写成**数据而不是散文**，正是为了让这条判据能读；而且它读的是双向：
+**某一臂跑测试 ⟺ 工具链在那一臂装得起来** —— 把 `tests` 改成 false 去消音会红，改成 true 去硬撑也会红。
+
+| # | 判据 | 刀 | 读数 |
+|---|---|---|---|
+| 1 | 部署表承诺的两个下限，等于真实存在的两个下限 | 把表里"运行 >= 20.9"改成 `20.10` | 只红 `[1.]` |
+| 2 | 每个臂都不低于运行下限，且**至少有一个臂正好坐在下限上** | 一把加 `18.x` 臂；另一把把 `20.9.0` 改成 `20.11.0`（于是没有臂坐在下限上） | 两把都只红 `[2.]` |
+| 3 | 每一臂都声明了自己的意图，且 `tests` 与工具链下限一致 | 三把：capable 臂改成 `tests: false`；20.9 臂改成 `true`；删掉一臂的 `tests:` 行 | 三把都只红 `[3.]` |
+
+控制跑：**3 legs，0 not passed**；六把刀**各自只红自己那一格**（`scratch/knife-version-claims.mjs`，
+`finally` 里把 `ci.yml` / `DEPLOYMENT.md` / `package.json` 三份原文写回，跑完 `git status` 只剩预期的改动）。
+判据 2 里"必须有一个臂正好坐在下限上"是这一族的关键：否则"支持 >= 20.9"可以靠把所有臂都抬到 24 而**静默地不再被验**。
+
+**边界要写清**：这条判据要读 `node_modules/vite/package.json` ⇒ 只在装了 devDependencies 的地方跑得起来
+（CI 的 `npm ci` 有；交付产物里没有测试，本来也不跑它）。
+**并且本节没有"CI 绿了"这句**：那一臂的真实结果只能等这一发改上去之后那一跑说了算 —— 读数记在推送后的核验里，不预先写进报告。
+

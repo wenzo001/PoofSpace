@@ -2,8 +2,16 @@ name: CI
 
 # What this workflow does and does not prove.
 #
-# It runs the checks that need nothing but Node: typecheck on both projects, and the full
-# vitest suite (unit, integration, security, lifecycle, storage, capacity, admin, perf).
+# It runs the checks that need nothing but Node: typecheck on both projects, the production
+# build, an audit that boots the packaged artifact, and the full vitest suite (unit,
+# integration, security, lifecycle, storage, capacity, admin, perf).
+#
+# Two different floors live here and they are not the same number. The product is claimed to run
+# from Node 20.9.0, and every arm -- including that one -- typechecks, builds and boots the
+# artifact it would ship. The test *toolchain* needs more: vite declares ^20.19.0 || >=22.12.0,
+# and on 20.9.0 loading vitest's config throws ERR_REQUIRE_ESM because require() of an ES module
+# does not exist before Node 20.19. So the suite runs only on the arms that can run it, and the
+# arm that skips says so out loud instead of going quietly green.
 #
 # It does NOT run `npm run gates`. That table needs a machine this workflow does not have:
 # PM2 installed (B4), a real chromium plus a routable non-loopback IPv4 address so that
@@ -24,7 +32,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['20.9.0', '24.x']
+        # `tests` is data, not prose. The governance judgement
+        # tests/governance/node-version-claims-agree.test.ts requires it to be true on an arm
+        # exactly when the installed toolchain can run there -- so setting it to false on a
+        # capable arm is red, and a skip cannot be used to silence a failing leg.
+        include:
+          - node: '20.9.0'   # the floor the product claims to run at: build + packaged boot
+            tests: false
+          - node: '24.x'     # .node-version, and the base image the deployment uses
+            tests: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,4 +56,8 @@ jobs:
       - name: Audit the deployable artifact without publishing it
         run: npm run release -- --dry-run
       - name: Full test suite
+        if: matrix.tests
         run: npm test
+      - name: This arm does not run the test suite
+        if: ${{ !matrix.tests }}
+        run: echo "::warning title=tests skipped on this arm::npm test was NOT run on node ${{ matrix.node }}: the installed vite requires a newer Node than this arm. This arm proves the product typechecks, builds and boots from the packaged artifact -- nothing more."

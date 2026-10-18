@@ -11,6 +11,25 @@ claims in `docs/DEBT.md`.
 
 ## Unreleased
 
+### Added
+
+- The Node version floor is now one claim instead of four that did not read each other.
+  `.github/workflows/ci.yml` spells its matrix arms as data (`node` plus `tests`), `npm test` runs only on
+  the arms where the toolchain can load, and the arm that skips says so as a workflow warning instead of
+  going quietly green. The two floors are genuinely different: the product is verified to typecheck, build
+  and boot from its own packaged artifact on Node 20.9.0, while vite 7 needs >= 20.19 before vitest can read
+  a config file at all. `tests/governance/node-version-claims-agree.test.ts` collides the deployment table,
+  `engines.node`, the matrix and vite's own engines, and makes "this arm runs the suite" an if-and-only-if
+  with "the toolchain loads on this arm" -- so flipping `tests: false` cannot be used to silence a failing
+  leg, and raising every arm above the floor cannot be used to stop exercising it. Three judgements, six
+  knives, each red only on its own leg; see `docs/TEST-REPORT.md` 7.16.
+
+### Fixed
+
+- GitHub Actions' `verify (20.9.0)` arm has failed with `ERR_REQUIRE_ESM` on every run since the workflow
+  existed -- five for five. npm had been printing the reason at install time (`EBADENGINE` for
+  `vite@7.3.7`, which requires `^20.19.0 || >=22.12.0`) and nothing read it.
+
 ## 1.1.1 — 2026-10-18
 
 ### Added
